@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test WebSocket</title>
+    <style>
+        body { font-family: Arial; padding: 20px; background: #1e1e1e; color: #fff; }
+        #messages { background: #2d2d2d; padding: 10px; height: 300px; overflow-y: auto; margin: 10px 0; border-radius: 5px; }
+        input, button { padding: 10px; font-size: 16px; margin: 5px; }
+        input { width: 70%; }
+        .recibido { color: #4CAF50; }
+        .enviado { color: #2196F3; }
+        .error { color: #f44336; }
+        .info { color: #FFC107; }
+    </style>
+</head>
+<body>
+    <h1>🎵 Test WebSocket - Streaming</h1>
+    
+    <div>
+        <input type="text" id="url" placeholder="ws://TU_IP:8000" style="width: 60%;">
+        <button onclick="conectar()">Conectar</button>
+        <button onclick="desconectar()">Desconectar</button>
+    </div>
+    
+    <div id="messages"></div>
+    
+    <div>
+        <input type="text" id="mensaje" placeholder="Escribe un mensaje..." onkeypress="if(event.key==='Enter') enviar()">
+        <button onclick="enviar()">Enviar</button>
+    </div>
+
+    <script>
+        let ws = null;
+        const messagesDiv = document.getElementById('messages');
+        
+        function log(mensaje, tipo = 'info') {
+            const div = document.createElement('div');
+            div.className = tipo;
+            div.textContent = `[${new Date().toLocaleTimeString()}] ${mensaje}`;
+            messagesDiv.appendChild(div);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        }
+        
+        function conectar() {
+            const url = document.getElementById('url').value;
+            
+            if (!url) {
+                log('❌ Por favor ingresa una URL', 'error');
+                return;
+            }
+            
+            try {
+                ws = new WebSocket(url);
+                
+                ws.onopen = () => {
+                    log('✅ Conectado al servidor', 'info');
+                };
+                
+                ws.onmessage = (event) => {
+                    log(`📨 Recibido: ${event.data}`, 'recibido');
+                };
+                
+                ws.onerror = (error) => {
+                    log('❌ Error de conexión', 'error');
+                };
+                
+                ws.onclose = () => {
+                    log('🔌 Desconectado', 'info');
+                };
+            } catch (error) {
+                log(`❌ Error: ${error.message}`, 'error');
+            }
+        }
+        
+        function desconectar() {
+            if (ws) {
+                ws.close();
+                ws = null;
+            }
+        }
+        
+        function enviar() {
+            const input = document.getElementById('mensaje');
+            const mensaje = input.value;
+            
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                log('❌ No estás conectado', 'error');
+                return;
+            }
+            
+            if (!mensaje) {
+                log('❌ Escribe un mensaje', 'error');
+                return;
+            }
+            
+            ws.send(mensaje);
+            log(`📤 Enviado: ${mensaje}`, 'enviado');
+            input.value = '';
+        }
+    </script>
+</body>
+</html>
