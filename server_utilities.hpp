@@ -1,7 +1,7 @@
 #pragma once
 
-#include "socket_utilities.hpp":
-#include <iostream>;
-#include <cstring>;
+#include "socket_utilities.hpp"
 
 using namespace std;
+
+int createTcpServerSocket(int port);

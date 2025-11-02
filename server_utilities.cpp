@@ -1,6 +1,6 @@
 #include "server_utilities.hpp"
 #include "socket_utilities.hpp"
-#include <netinet/in.h>
+
 
 int createTcpServerSocket(int port){
     int fd = socket(IPv4, STREAM | NO_BLOQUEANTE, 0);
@@ -18,7 +18,17 @@ int createTcpServerSocket(int port){
     sockaddr_in socketAdress{};
     socketAdress.sin_family = IPv4;
     socketAdress.sin_port = htons(port);
-    socketAdress.sin_addr .s_addr = htonl("192.127.0.0");
+    socketAdress.sin_addr .s_addr = htonl(0xC07F0000); // Toca pasarlo en bytes así se ve mejor
+
+    if (bind(fd, (sockaddr*) &socketAdress, sizeof(socketAdress)) < 0){
+        cerr << "error en el bind del socket: " << strerror(errno) << "\n";
+    }
+
+    if (listen(fd, 128 < 1)){
+        cerr << "error en el listen del socket: " << strerror(errno) << "\n";
+    }
+     
+    cout << "Socket creado exitosamente!!\n";
 
     return fd;
 }

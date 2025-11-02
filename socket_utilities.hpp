@@ -1,11 +1,24 @@
 #pragma once
 
 #include <asm-generic/socket.h>
+#include <cstddef>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <cstring>
+#include <iostream>
+#include <string>
+#include <unistd.h>
+
 
 using namespace std;
+
+
+struct UPnPURL{
+    string ip;
+    int port;
+    string path;
+};
 
 // Rename constants for clarity //
 
@@ -32,5 +45,11 @@ constexpr int REUSE_PORT = SO_REUSEPORT; //  Sirve para que muchos sockets se pu
 constexpr int SEND_BUFFER_SIZE = SO_SNDBUF; // Opción para cambiar el tamaño del buffer de send
 constexpr int RECIEVE_BUFFER_SIZE = SO_RCVBUF; // Opción para cambiar el tamaño del buffer de send
 constexpr int LOW_LATENCY_MODE = SO_INCOMING_CPU;
+constexpr int RECIEVE_EVERYWHERE = INADDR_ANY;
 
 constexpr int SOCKET_LEVEL = SOL_SOCKET;
+
+int createSearchSocket();
+void askRouterUPnPURL(int searchSocket);
+int connectUPnP();
+UPnPURL parseURL(string &stringURL);
