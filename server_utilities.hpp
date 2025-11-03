@@ -8,6 +8,7 @@
 using namespace std;
 
 extern std::map<int, std::string> clientBuffers;
+extern bool serverRunning;
 
 int createTcpServerSocket();
 int crearEpoll();
@@ -18,3 +19,4 @@ void runServer(int& serverSocket);
 void processCommands(int clientFd);
 void handleCommand(int clientFd, string command);
 int receiveFromClient(int clientFd, int epollFd);
+void closeServer();

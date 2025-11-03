@@ -6,8 +6,10 @@
 #include <string>
 #include <sys/epoll.h>
 #include <sys/socket.h>
+#include <unistd.h>
 
 map<int, string> clientBuffers;
+bool serverRunning = true;
 
 int createTcpServerSocket() {
 	int fd = socket(IPv4, STREAM | NO_BLOQUEANTE, 0);
@@ -139,37 +141,44 @@ int receiveFromClient(int clientFd, int epollFd) {
 }
 
 void processCommands(int clientFd) {
-    string& buffer = clientBuffers[clientFd];
-    size_t pos;
-    
-    // Procesar TODOS los comandos que tengan \n
-    while ((pos = buffer.find('\n')) != string::npos) {
-        string command = buffer.substr(0, pos);
-        buffer.erase(0, pos + 1); // Remover comando procesado (incluye \n)
-        // Ignorar comandos vacíos
-        if (command.empty()) {
-            continue;
-        }
+	string &buffer = clientBuffers[clientFd];
+	size_t pos;
 
-        cout << "[CLIENT " << clientFd << "] Comando: " << command << "\n";
-        handleCommand(clientFd, command);
-    }
+	// Procesar TODOS los comandos que tengan \n
+	while ((pos = buffer.find('\n')) != string::npos) {
+		string command = buffer.substr(0, pos);
+		buffer.erase(0, pos + 1); // Remover comando procesado (incluye \n)
+		// Ignorar comandos vacíos
+		if (command.empty()) {
+			continue;
+		}
+
+		cout << "[CLIENT " << clientFd << "] Comando: " << command << "\n";
+		handleCommand(clientFd, command);
+	}
 }
 
-void handleCommand(int clientFd, string command){
-        cout << "[COMMAND] Cliente " << clientFd << ": " << command << "\n";
-    
-    // TODO: Implementar lógica de comandos
-    if (command == "EXIT") {
-        cout << "[SERVER] CERRANDO SERVIDOR.\n";
-    } else if (command == "ADD") {
-        cout << "[SERVER] LOGICA DE URL AÑADIR MUSICA DE YOUTUBE...\n";
-    } else if (command == "SKIP") {
-        cout << "[ACTION] Saltando canción...\n";
-    } else if (command.find("VOLUME") == 0) {
-        cout << "[ACTION] Cambiando volumen...\n";
-    } else {
-}}
+void handleCommand(int clientFd, string command) {
+	cout << "[COMMAND] Cliente " << clientFd << ": " << command << "\n";
+
+	// TODO: Implementar lógica de comandos
+	if (command == "EXIT") {
+		cout << "[SERVER] CERRANDO SERVIDOR.\n";
+		closeServer();
+	} else if (command == "ADD") {
+		cout << "[SERVER] LOGICA DE URL AÑADIR MUSICA DE YOUTUBE...\n";
+	} else if (command == "SKIP") {
+		cout << "[ACTION] Saltando canción...\n";
+	} else if (command.find("VOLUME") == 0) {
+		cout << "[ACTION] Cambiando volumen...\n";
+	} else {
+	}
+}
+
+void closeServer() {
+	serverRunning = false;
+}
+
 int mainloop(int &serverSocket) {
 	cout << "[DEBUG] Creando epoll\n";
 	int epollFd = crearEpoll();
@@ -185,7 +194,7 @@ int mainloop(int &serverSocket) {
 		return -1;
 	}
 	struct epoll_event events[200];
-	bool serverRunning = true;
+	serverRunning = true;
 	cout << "[SERVER] SERVIDOR CREADO Y ESPERANDO...\n";
 	while (serverRunning) {
 		int nfds = epoll_wait(epollFd, events, 200, -1);
@@ -209,18 +218,16 @@ int mainloop(int &serverSocket) {
 			}
 			if (event & EPOLLIN) {
 				int isMessage = receiveFromClient(connectionFd, epollFd);
-                if (isMessage == 1){
-                    processCommands(connectionFd);
-                }
-                else if (isMessage == 0){
-                    continue;
-                }
-                else {
-                    epoll_ctl(epollFd, EPOLL_CTL_DEL, connectionFd, nullptr);
-                    close(connectionFd);
-                    clientBuffers.erase(connectionFd);
-                    cout << "[INFO] Cliente " << connectionFd << " desconectado\n";
-                }
+				if (isMessage == 1) {
+					processCommands(connectionFd);
+				} else if (isMessage == 0) {
+					continue;
+				} else {
+					epoll_ctl(epollFd, EPOLL_CTL_DEL, connectionFd, nullptr);
+					close(connectionFd);
+					clientBuffers.erase(connectionFd);
+					cout << "[INFO] Cliente " << connectionFd << " desconectado\n";
+				}
 			}
 			if (event & EPOLLOUT) {
 				continue;
@@ -228,20 +235,31 @@ int mainloop(int &serverSocket) {
 		}
 		if (!serverRunning) break;
 	}
+	for (auto &pair : clientBuffers) {
+		int clientFd = pair.first;
+		cout << "[SERVER] Cerrando cliente " << clientFd << "\n";
+		epoll_ctl(epollFd, EPOLL_CTL_DEL, clientFd, nullptr);
+		close(clientFd);
+	}
+	clientBuffers.clear();
+
+	// Cerrar epoll
+	close(epollFd);
 	return 0;
 }
 void runServer(int &serverSocket) {
 	cout << "1. TCP UPnP public server\n2. TCP Local server\n[CLIENT]: ";
 	int type;
 	cin >> type;
-
+    UPnPRouter router;
 	if (type == 1) {
-		UPnPRouter router;
 		int internalPort;
 		connectUPnP(serverSocket, 15069, router);
 	} else {
 		connectLocal(serverSocket);
 	}
 	mainloop(serverSocket);
+    closeRouterPort(router, 15069);
+    close(serverSocket);
 	return;
 }
