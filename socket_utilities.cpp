@@ -1,17 +1,9 @@
 #include "socket_utilities.hpp"
-#include <arpa/inet.h>
-#include <cstdio>
-#include <cstring>
-#include <iostream>
-#include <iterator>
 #include <netinet/in.h>
-#include <sys/socket.h>
-#include <unistd.h>
-#include <vector>
 
 int createSearchSocket() {
 	cout << "[DEBUG] Creando socket de búsqueda UDP...\n";
-	int fd = socket(IPv4, DGRAM, 0);
+	int fd = socket(IPv4, DGRAM, 0);	//	Creamos 
 
 	if (fd < 0) {
 		cerr << "[ERROR] No se pudo crear socket: " << strerror(errno) << "\n";
@@ -23,7 +15,7 @@ int createSearchSocket() {
 	struct timeval tv;
 	tv.tv_sec = 3;
 	tv.tv_usec = 0;
-	setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof tv);
+	setsockopt(fd, SOCKET_LEVEL, SO_RCVTIMEO, (const char*)&tv, sizeof tv);
 	cout << "[DEBUG] Timeout de 3 segundos configurado\n";
 
 	struct sockaddr_in localAddress;
@@ -413,7 +405,7 @@ string sendSOAPRequest(UPnPRouter &router, string soapAction, string soapBody) {
 
 	// Timeout de 3 segundos
 	struct timeval tv;
-	tv.tv_sec = 3;
+	tv.tv_sec = 2;
 	tv.tv_usec = 0;
 	setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof tv);
 	setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, (const char*)&tv, sizeof tv);
@@ -617,17 +609,21 @@ int connectUPnP(int serverSocket, int port, UPnPRouter &usedRouter) {
 	return 0;
 }
 
+int getPort(int socketFd){
+	sockaddr_in serverAddress{};
+	socklen_t len = sizeof(serverAddress);
+	if (getsockname(socketFd, (sockaddr*)&serverAddress, &len) < 0) {
+		cerr << "[ERROR] No se pudo obtener el puerto del servidor: " << strerror(errno) << "\n";
+		return -1;
+	}
+	return ntohs(serverAddress.sin_port);
+}
+
 int connectLocal(int serverSocket) {
 	cout << "[DEBUG] ========== INICIO connectLocal ==========\n";
 	
 	// Obtener el puerto del socket del servidor
-	sockaddr_in serverAddress{};
-	socklen_t len = sizeof(serverAddress);
-	if (getsockname(serverSocket, (sockaddr*)&serverAddress, &len) < 0) {
-		cerr << "[ERROR] No se pudo obtener el puerto del servidor: " << strerror(errno) << "\n";
-		return -1;
-	}
-	int port = ntohs(serverAddress.sin_port);
+	int port = getPort(serverSocket);
 	
 	// Obtener IP local
 	string localIP = getLocalIPAddress();

@@ -3,7 +3,6 @@
 
 int main(){
     int serverSocket = createTcpServerSocket();
-    connectLocal(serverSocket);
-    close(serverSocket);
+    runServer(serverSocket);
     return 0;
 }
