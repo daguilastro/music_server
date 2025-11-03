@@ -2,6 +2,7 @@
 #include "socket_utilities.hpp"
 
 int main(){
-    connectUPnP();
+    int serverSocket = createTcpServerSocket();
+    connectUPnP(serverSocket, 8080);
     return 0;
 }

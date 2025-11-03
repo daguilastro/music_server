@@ -9,6 +9,7 @@
 #include <iostream>
 #include <string>
 #include <unistd.h>
+#include <vector>
 
 
 using namespace std;
@@ -18,6 +19,20 @@ struct UPnPURL{
     string ip;
     int port;
     string path;
+};
+
+struct UPnPService {
+    string serviceType;
+    string controlURL;
+    string SCPDURL;
+};
+
+struct UPnPRouter {
+    string ip;
+    int port;
+    string controlURL;
+    string SCPDURL;
+    string serviceType;
 };
 
 // Rename constants for clarity //
@@ -51,5 +66,8 @@ constexpr int SOCKET_LEVEL = SOL_SOCKET;
 
 int createSearchSocket();
 void askRouterUPnPURL(int searchSocket);
-int connectUPnP();
+int connectUPnP(int serverSocket, int routerPort);
 UPnPURL parseURL(string &stringURL);
+string recieveUPnPServices(UPnPURL &urlParts);
+UPnPService extractUPnPService(string xmlContent);
+vector<UPnPRouter> findAllValidUPnPRouters(int searchSocket);

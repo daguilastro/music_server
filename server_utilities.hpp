@@ -4,4 +4,4 @@
 
 using namespace std;
 
-int createTcpServerSocket(int port);
+int createTcpServerSocket();
