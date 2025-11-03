@@ -66,8 +66,14 @@ constexpr int SOCKET_LEVEL = SOL_SOCKET;
 
 int createSearchSocket();
 void askRouterUPnPURL(int searchSocket);
-int connectUPnP(int serverSocket, int routerPort);
+int connectUPnP(int serverSocket, int routerPort, UPnPRouter &usedRouter);
 UPnPURL parseURL(string &stringURL);
 string recieveUPnPServices(UPnPURL &urlParts);
 UPnPService extractUPnPService(string xmlContent);
 vector<UPnPRouter> findAllValidUPnPRouters(int searchSocket);
+bool tryOpenPortWithRouter(UPnPRouter &router, int serverSocket, int externalPort);
+string getExternalIPAddress(UPnPRouter &router);
+bool addPortMapping(UPnPRouter &router, int externalPort, int internalPort, string internalIP, string protocol, string description);
+string sendSOAPRequest(UPnPRouter &router, string soapAction, string soapBody);
+string getLocalIPAddress();
+bool closeRouterPort(UPnPRouter &router, int externalPort);

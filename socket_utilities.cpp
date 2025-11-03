@@ -306,7 +306,257 @@ UPnPService extractUPnPService(string xmlContent) {
 	return service;
 }
 
-int connectUPnP(int serverSocket, int port) {
+string getExternalIPAddress(UPnPRouter &router) {
+	cout << "[DEBUG]   -> Solicitando IP externa...\n";
+	
+	string soapBody = "<?xml version=\"1.0\"?>\r\n"
+					  "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\" "
+					  "s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\">\r\n"
+					  "<s:Body>\r\n"
+					  "<u:GetExternalIPAddress xmlns:u=\"urn:schemas-upnp-org:service:" + router.serviceType + "\">\r\n"
+					  "</u:GetExternalIPAddress>\r\n"
+					  "</s:Body>\r\n"
+					  "</s:Envelope>\r\n";
+
+	string response = sendSOAPRequest(router, "GetExternalIPAddress", soapBody);
+
+	size_t start = response.find("<NewExternalIPAddress>");
+	if (start == string::npos) {
+		cout << "[DEBUG]   -> No se encontró NewExternalIPAddress en la respuesta\n";
+		return "";
+	}
+	start += 22;
+	
+	size_t end = response.find("</NewExternalIPAddress>", start);
+	if (end == string::npos) {
+		cout << "[DEBUG]   -> Error parseando IP externa\n";
+		return "";
+	}
+	
+	string externalIP = response.substr(start, end - start);
+	cout << "[DEBUG]   -> IP externa: " << externalIP << "\n";
+	return externalIP;
+}
+
+bool addPortMapping(UPnPRouter &router, int externalPort, int internalPort, string internalIP, string protocol, string description) {
+	cout << "[DEBUG]   -> Enviando AddPortMapping...\n";
+	cout << "[DEBUG]   -> Externo: " << externalPort << " -> Interno: " << internalIP << ":" << internalPort << "\n";
+
+	string soapBody = "<?xml version=\"1.0\"?>\r\n"
+					  "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\" "
+					  "s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\">\r\n"
+					  "<s:Body>\r\n"
+					  "<u:AddPortMapping xmlns:u=\"urn:schemas-upnp-org:service:" + router.serviceType + "\">\r\n"
+					  "<NewRemoteHost></NewRemoteHost>\r\n"
+					  "<NewExternalPort>" + to_string(externalPort) + "</NewExternalPort>\r\n"
+					  "<NewProtocol>" + protocol + "</NewProtocol>\r\n"
+					  "<NewInternalPort>" + to_string(internalPort) + "</NewInternalPort>\r\n"
+					  "<NewInternalClient>" + internalIP + "</NewInternalClient>\r\n"
+					  "<NewEnabled>1</NewEnabled>\r\n"
+					  "<NewPortMappingDescription>" + description + "</NewPortMappingDescription>\r\n"
+					  "<NewLeaseDuration>0</NewLeaseDuration>\r\n"
+					  "</u:AddPortMapping>\r\n"
+					  "</s:Body>\r\n"
+					  "</s:Envelope>\r\n";
+
+	string response = sendSOAPRequest(router, "AddPortMapping", soapBody);
+
+	if (response.find("200 OK") != string::npos) {
+		cout << "[DEBUG]   -> AddPortMapping exitoso\n";
+		return true;
+	} else {
+		cout << "[DEBUG]   -> AddPortMapping falló\n";
+		cout << "[DEBUG]   -> Respuesta: " << response.substr(0, 200) << "...\n";
+		return false;
+	}
+}
+
+
+string sendSOAPRequest(UPnPRouter &router, string soapAction, string soapBody) {
+	cout << "[DEBUG]   -> Creando socket SOAP...\n";
+	int fd = socket(IPv4, STREAM, 0);
+	if (fd < 0) {
+		cerr << "[ERROR]   -> No se pudo crear socket: " << strerror(errno) << "\n";
+		return "";
+	}
+
+	// Timeout de 3 segundos
+	struct timeval tv;
+	tv.tv_sec = 3;
+	tv.tv_usec = 0;
+	setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof tv);
+	setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, (const char*)&tv, sizeof tv);
+
+	struct sockaddr_in routerAddress;
+	routerAddress.sin_family = IPv4;
+	routerAddress.sin_port = htons(router.port);
+	routerAddress.sin_addr.s_addr = inet_addr(router.ip.c_str());
+
+	cout << "[DEBUG]   -> Conectando a " << router.ip << ":" << router.port << "...\n";
+	if (connect(fd, (sockaddr *)&routerAddress, sizeof(routerAddress)) < 0) {
+		cerr << "[ERROR]   -> Error conectando: " << strerror(errno) << "\n";
+		close(fd);
+		return "";
+	}
+
+	// Construir petición HTTP POST con SOAP
+	string httpRequest = "POST " + router.controlURL + " HTTP/1.1\r\n";
+	httpRequest += "Host: " + router.ip + ":" + to_string(router.port) + "\r\n";
+	httpRequest += "Content-Type: text/xml; charset=\"utf-8\"\r\n";
+	httpRequest += "SOAPAction: \"urn:schemas-upnp-org:service:" + router.serviceType + "#" + soapAction + "\"\r\n";
+	httpRequest += "Content-Length: " + to_string(soapBody.length()) + "\r\n";
+	httpRequest += "Connection: close\r\n";
+	httpRequest += "\r\n";
+	httpRequest += soapBody;
+
+	cout << "[DEBUG]   -> Enviando petición SOAP (" << httpRequest.length() << " bytes)...\n";
+	if (send(fd, httpRequest.c_str(), httpRequest.size(), 0) < 0) {
+		cerr << "[ERROR]   -> Error enviando: " << strerror(errno) << "\n";
+		close(fd);
+		return "";
+	}
+
+	cout << "[DEBUG]   -> Esperando respuesta SOAP...\n";
+	char responseBuffer[4096];
+	string response;
+	int bytes;
+
+	while ((bytes = recv(fd, responseBuffer, sizeof(responseBuffer), 0)) > 0) {
+		response.append(responseBuffer, bytes);
+	}
+
+	close(fd);
+	cout << "[DEBUG]   -> Respuesta SOAP recibida (" << response.length() << " bytes)\n";
+	
+	return response;
+}
+
+string getLocalIPAddress() {
+	cout << "[DEBUG] Obteniendo IP local...\n";
+	
+	// Truco: conectar a un servidor externo para que el SO elija la interfaz correcta
+	int sock = socket(IPv4, SOCK_DGRAM, 0);
+	if (sock < 0) {
+		cerr << "[ERROR] No se pudo crear socket para obtener IP local\n";
+		return "";
+	}
+	
+	struct sockaddr_in server;
+	server.sin_family = AF_INET;
+	server.sin_addr.s_addr = inet_addr("8.8.8.8"); // Google DNS
+	server.sin_port = htons(53);
+	
+	// No necesita realmente enviar datos, solo conectar
+	if (connect(sock, (struct sockaddr*)&server, sizeof(server)) < 0) {
+		cerr << "[ERROR] No se pudo obtener IP local: " << strerror(errno) << "\n";
+		close(sock);
+		return "";
+	}
+	
+	struct sockaddr_in name;
+	socklen_t namelen = sizeof(name);
+	if (getsockname(sock, (struct sockaddr*)&name, &namelen) < 0) {
+		cerr << "[ERROR] Error en getsockname: " << strerror(errno) << "\n";
+		close(sock);
+		return "";
+	}
+	
+	char buffer[INET_ADDRSTRLEN];
+	inet_ntop(AF_INET, &name.sin_addr, buffer, INET_ADDRSTRLEN);
+	
+	close(sock);
+	
+	string localIP(buffer);
+	cout << "[DEBUG] IP local detectada: " << localIP << "\n";
+	return localIP;
+}
+
+bool tryOpenPortWithRouter(UPnPRouter &router, int serverSocket, int externalPort) {
+	cout << "\n[DEBUG] ========================================\n";
+	cout << "[DEBUG] Intentando abrir puerto con router:\n";
+	cout << "[DEBUG]   IP: " << router.ip << ":" << router.port << "\n";
+	cout << "[DEBUG]   Service: " << router.serviceType << "\n";
+	cout << "[DEBUG] ========================================\n";
+	
+	// 1. Obtener el puerto del socket del servidor
+	sockaddr_in serverAddress{};
+	socklen_t len = sizeof(serverAddress);
+	if (getsockname(serverSocket, (sockaddr*)&serverAddress, &len) < 0) {
+		cerr << "[ERROR] No se pudo obtener el puerto del servidor: " << strerror(errno) << "\n";
+		return false;
+	}
+	int internalPort = ntohs(serverAddress.sin_port);
+	cout << "[DEBUG] Puerto interno del servidor: " << internalPort << "\n";
+	
+	// 2. Obtener IP pública
+	cout << "[DEBUG] Obteniendo IP pública...\n";
+	string externalIP = getExternalIPAddress(router);
+	
+	if (externalIP.empty()) {
+		cout << "[DEBUG] No se pudo obtener IP pública\n";
+		return false;
+	}
+	
+	// 3. Verificar que sea una IP pública (no privada)
+	if (externalIP.find("192.168.") == 0 || 
+	    externalIP.find("10.") == 0 || 
+	    externalIP.find("172.16.") == 0 ||
+	    externalIP.find("127.") == 0) {
+		cout << "[DEBUG] IP privada detectada (" << externalIP << "), router no tiene IP pública\n";
+		return false;
+	}
+	
+	cout << "[INFO] IP pública válida: " << externalIP << "\n";
+	
+	// 4. Obtener IP local
+	string localIP = getLocalIPAddress();
+	
+	// 5. Intentar mapear el puerto
+	cout << "[DEBUG] Mapeando puerto externo " << externalPort << " -> interno " << internalPort << "\n";
+	bool success = addPortMapping(router, externalPort, internalPort, localIP, "TCP", "Server-" + to_string(externalPort));
+	
+	if (success) {
+		cout << "\n[SUCCESS] ===== Puerto abierto exitosamente =====\n";
+		cout << "[INFO] Router usado: " << router.ip << "\n";
+		cout << "[INFO] Tu servidor es accesible desde:\n";
+		cout << "[INFO]   " << externalIP << ":" << externalPort << "\n";
+		cout << "[INFO] Redirige a: " << localIP << ":" << internalPort << "\n";
+		cout << "========================================\n\n";
+		return true;
+	}
+	
+	cout << "[DEBUG] No se pudo mapear el puerto en este router\n";
+	return false;
+}
+
+
+bool closeRouterPort(UPnPRouter &router, int externalPort) {
+	cout << "[DEBUG] Cerrando puerto " << externalPort << " en el router...\n";
+	
+	string soapBody = "<?xml version=\"1.0\"?>\r\n"
+					  "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\" "
+					  "s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\">\r\n"
+					  "<s:Body>\r\n"
+					  "<u:DeletePortMapping xmlns:u=\"urn:schemas-upnp-org:service:" + router.serviceType + "\">\r\n"
+					  "<NewRemoteHost></NewRemoteHost>\r\n"
+					  "<NewExternalPort>" + to_string(externalPort) + "</NewExternalPort>\r\n"
+					  "<NewProtocol>TCP</NewProtocol>\r\n"
+					  "</u:DeletePortMapping>\r\n"
+					  "</s:Body>\r\n"
+					  "</s:Envelope>\r\n";
+
+	string response = sendSOAPRequest(router, "DeletePortMapping", soapBody);
+
+	if (response.find("200 OK") != string::npos) {
+		cout << "[SUCCESS] Puerto " << externalPort << " cerrado correctamente\n";
+		return true;
+	} else {
+		cerr << "[ERROR] No se pudo cerrar el puerto\n";
+		return false;
+	}
+}
+
+int connectUPnP(int serverSocket, int port, UPnPRouter &usedRouter) {
 	cout << "[DEBUG] ========== INICIO connectUPnP ==========\n";
 	
 	int fd = createSearchSocket();
@@ -317,6 +567,19 @@ int connectUPnP(int serverSocket, int port) {
 	
 	askRouterUPnPURL(fd);
 	vector<UPnPRouter> routers = findAllValidUPnPRouters(fd);
+
+	for (auto& router : routers){
+		if (tryOpenPortWithRouter(router, serverSocket, port)) {
+			usedRouter.ip = router.ip;
+			usedRouter.port = router.port;
+			usedRouter.controlURL = router.controlURL;
+			usedRouter.SCPDURL = router.SCPDURL;
+			usedRouter.serviceType = router.serviceType;
+			cout << "[DEBUG] ========== FIN connectUPnP (ÉXITO) ==========\n";
+			return 0; // Éxito
+		}
+		cout << "[DEBUG] Probando siguiente router...\n";
+	}
 	
 	close(fd);
 	cout << "[DEBUG] ========== FIN connectUPnP ==========\n";
