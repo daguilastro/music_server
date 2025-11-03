@@ -77,3 +77,4 @@ bool addPortMapping(UPnPRouter &router, int externalPort, int internalPort, stri
 string sendSOAPRequest(UPnPRouter &router, string soapAction, string soapBody);
 string getLocalIPAddress();
 bool closeRouterPort(UPnPRouter &router, int externalPort);
+int connectLocal(int serverSocket);

@@ -247,20 +247,51 @@ string recieveUPnPServices(UPnPURL &urlParts) {
 }
 
 UPnPURL parseURL(string &stringURL) {
+	UPnPURL url;
+	
 	size_t location_pos = stringURL.find("LOCATION:");
+	if (location_pos == string::npos) {
+		cerr << "[ERROR] No se encontró LOCATION\n";
+		return url;
+	}
+	
 	size_t url_start = stringURL.find("http", location_pos);
+	if (url_start == string::npos) {
+		cerr << "[ERROR] No se encontró http en LOCATION\n";
+		return url;
+	}
+	
 	size_t url_end = stringURL.find("\r\n", url_start);
+	if (url_end == string::npos) {
+		cerr << "[ERROR] No se encontró fin de línea después de http\n";
+		return url;
+	}
 
 	stringURL = stringURL.substr(url_start, url_end - url_start);
 	stringURL.erase(0, stringURL.find_first_not_of(" \t\r\n"));
 	stringURL.erase(stringURL.find_last_not_of(" \t\r\n") + 1);
 
+	cout << "[DEBUG]   URL limpia: " << stringURL << "\n";
+
 	size_t protocol_end = stringURL.find("://");
+	if (protocol_end == string::npos) {
+		cerr << "[ERROR] No se encontró :// en URL\n";
+		return url;
+	}
+	
 	size_t ip_start = protocol_end + 3;
 	size_t port_start = stringURL.find(":", ip_start);
+	if (port_start == string::npos) {
+		cerr << "[ERROR] No se encontró puerto en URL\n";
+		return url;
+	}
+	
 	size_t path_start = stringURL.find("/", port_start);
+	if (path_start == string::npos) {
+		cerr << "[ERROR] No se encontró path en URL\n";
+		return url;
+	}
 
-	UPnPURL url;
 	url.ip = stringURL.substr(ip_start, port_start - ip_start);
 	url.port = stoi(stringURL.substr(port_start + 1, path_start - port_start - 1));
 	url.path = stringURL.substr(path_start);
@@ -583,5 +614,35 @@ int connectUPnP(int serverSocket, int port, UPnPRouter &usedRouter) {
 	
 	close(fd);
 	cout << "[DEBUG] ========== FIN connectUPnP ==========\n";
+	return 0;
+}
+
+int connectLocal(int serverSocket) {
+	cout << "[DEBUG] ========== INICIO connectLocal ==========\n";
+	
+	// Obtener el puerto del socket del servidor
+	sockaddr_in serverAddress{};
+	socklen_t len = sizeof(serverAddress);
+	if (getsockname(serverSocket, (sockaddr*)&serverAddress, &len) < 0) {
+		cerr << "[ERROR] No se pudo obtener el puerto del servidor: " << strerror(errno) << "\n";
+		return -1;
+	}
+	int port = ntohs(serverAddress.sin_port);
+	
+	// Obtener IP local
+	string localIP = getLocalIPAddress();
+	
+	if (localIP.empty()) {
+		cerr << "[ERROR] No se pudo obtener la IP local\n";
+		return -1;
+	}
+	
+	cout << "\n[SUCCESS] ===== Servidor local configurado =====\n";
+	cout << "[INFO] Tu servidor está escuchando en:\n";
+	cout << "[INFO]   " << localIP << ":" << port << "\n";
+	cout << "[INFO] Dispositivos en tu red local pueden conectarse a esta dirección\n";
+	cout << "========================================\n\n";
+	
+	cout << "[DEBUG] ========== FIN connectLocal ==========\n";
 	return 0;
 }
