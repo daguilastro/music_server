@@ -49,12 +49,7 @@ int main(int argc, char* argv[]) {
     cout << "[SUCCESS] Conectado al servidor!\n";
     cout << "\n========================================\n";
     cout << "Comandos disponibles:\n";
-    cout << "  PLAY     - Reproducir música\n";
-    cout << "  PAUSE    - Pausar reproducción\n";
-    cout << "  SKIP     - Saltar canción\n";
-    cout << "  VOLUME X - Cambiar volumen (X = 0-100)\n";
     cout << "  EXIT     - Cerrar servidor\n";
-    cout << "  quit     - Desconectar cliente\n";
     cout << "========================================\n\n";
 
     string command;

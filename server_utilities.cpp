@@ -1,5 +1,6 @@
 #include "server_utilities.hpp"
 #include "socket_utilities.hpp"
+#include "worker.hpp"
 #include <arpa/inet.h>
 #include <cstring>
 #include <netinet/in.h>
@@ -10,6 +11,151 @@
 
 map<int, string> clientBuffers;
 bool serverRunning = true;
+map<string, void (*)(int, string)> commandHandlers;
+vector<WorkerInfo> workers;
+
+void initializeCommandHandlers() {
+	commandHandlers["ADD"] = handleAddCommand;
+	commandHandlers["EXIT"] = handleExitCommand;
+
+	cout << "[Server] Command handlers initialized" << endl;
+}
+
+bool initializeWorkers(int epollFd) {
+	cout << "[Server] Inicializando 4 workers..." << endl;
+
+	for (int i = 0; i < 4; i++) {
+		int pipeToWorker[2];
+		int pipeFromWorker[2];
+
+		if (pipe(pipeToWorker) == -1 || pipe(pipeFromWorker) == -1) {
+			perror("pipe");
+			return false;
+		}
+
+		pid_t pid = fork();
+
+		if (pid == -1) {
+			perror("fork");
+			return false;
+		}
+
+		if (pid == 0) {
+			// ===== PROCESO HIJO (WORKER) =====
+			close(pipeToWorker[1]);
+			close(pipeFromWorker[0]);
+			workerProcess(pipeToWorker[0], pipeFromWorker[1], i);
+			exit(0);
+		}
+
+		// ===== PROCESO PADRE (SERVIDOR) =====
+		close(pipeToWorker[0]);
+		close(pipeFromWorker[1]);
+
+		// Configurar como no bloqueante
+		int flags = fcntl(pipeFromWorker[0], F_GETFL, 0);
+		fcntl(pipeFromWorker[0], F_SETFL, flags | O_NONBLOCK);
+
+		// Crear WorkerInfo
+		WorkerInfo worker;
+		worker.pid = pid;
+		worker.pipe_read_fd = pipeFromWorker[0];
+		worker.pipe_write_fd = pipeToWorker[1];
+		worker.state = WORKER_IDLE;
+		worker.current_request_id = 0;
+		workers.push_back(worker);
+
+		// ===== AÑADIR WORKER A EPOLL CON CALLBACK =====
+		if (addToEpoll(epollFd, pipeFromWorker[0], handleWorkerEvent, &workers.back()) < 0) {
+			cerr << "[ERROR] No se pudo añadir worker a epoll\n";
+			return false;
+		}
+
+		cout << "[Server] Worker " << i << " creado (PID: " << pid << ")" << endl;
+	}
+
+	cout << "[Server] Todos los workers inicializados" << endl;
+	return true;
+}
+
+void handleClientEvent(int fd, void *data) {
+	int epollFd = *(int *)data;
+
+	int isMessage = receiveFromClient(fd, epollFd);
+	if (isMessage == 1) {
+		processCommands(fd);
+	} else if (isMessage < 0) {
+		epoll_ctl(epollFd, EPOLL_CTL_DEL, fd, nullptr);
+		close(fd);
+		clientBuffers.erase(fd);
+		cout << "[INFO] Cliente " << fd << " desconectado\n";
+	}
+}
+
+void handleWorkerEvent(int fd, void *data) {
+	WorkerInfo *worker = static_cast<WorkerInfo *>(data);
+
+	WorkerMessage response;
+	if (!readWorkerMessage(fd, response)) {
+		cerr << "[Server] Error leyendo de worker " << worker->pid << endl;
+		return;
+	}
+
+	// Procesar mensaje FINISHED
+	if (response.type == MSG_FINISHED) {
+		cout << "[Server] Worker " << worker->pid << " terminó request "
+			 << response.request_id << ": " << response.data << endl;
+
+		// Marcar worker como IDLE
+		worker->state = WORKER_IDLE;
+		worker->current_request_id = 0;
+
+		// TODO: Intentar asignar más trabajo
+	} else {
+		cerr << "[Server] Tipo de mensaje inesperado de worker" << endl;
+	}
+}
+
+void handleAddCommand(int clientFd, string args) {
+}
+
+void handleExitCommand(int clientFd, string args) {
+	serverRunning = false;
+}
+
+void handleServerEvent(int fd, void *data) {
+	int epollFd = *(int *)data;
+
+	cout << "[DEBUG] Nueva conexión entrante en FD " << fd << endl;
+
+	// Aceptar todas las conexiones pendientes
+	while (acceptNewClient(fd, epollFd) >= 1) {
+		// Continúa aceptando mientras haya conexiones
+	}
+}
+
+void handleCommand(int clientFd, string request) {
+	cout << "[REQUEST] Cliente " << clientFd << ": " << request << endl;
+
+	// Separar el comando de sus argumentos
+	string command;
+	string arguments;
+
+	size_t space_pos = request.find(' ');
+	if (space_pos != string::npos) {
+		command = request.substr(0, space_pos); // "ADD"
+		arguments = request.substr(space_pos + 1); // "https://..."
+	} else {
+		// No hay argumentos: "SKIP"
+		command = request;
+		arguments = "";
+	}
+	if (commandHandlers.count(command)) {
+		commandHandlers[command](clientFd, arguments);
+	} else {
+		cerr << "[ERROR] Comando desconocido: " << command << endl;
+	}
+}
 
 int createTcpServerSocket() {
 	int fd = socket(IPv4, STREAM | NO_BLOQUEANTE, 0);
@@ -49,36 +195,47 @@ int crearEpoll() {
 	return epollFd;
 }
 
-int addSocketToEpoll(int epollFd, int listenSocket) {
+int addToEpoll(int epollFd, int fd, void (*handler)(int, void *), void *data) {
+	// Crear el callback
+	EpollCallbackData *callback = new EpollCallbackData;
+	callback->fd = fd;
+	callback->handler = handler;
+	callback->data = data;
+
+	// Configurar evento de epoll
 	struct epoll_event event;
 	event.events = EPOLLIN;
-	event.data.fd = listenSocket;
+	event.data.ptr = callback;
 
-	cout << "[DEBUG] añadiendo FD " << listenSocket << " a epoll (epollFd=" << epollFd << ")\n";
+	cout << "[DEBUG] añadiendo FD " << fd << " con callback a epoll (epollFd=" << epollFd << ")\n";
 
-	if (epoll_ctl(epollFd, EPOLL_CTL_ADD, listenSocket, &event) != 0) {
-		cerr << "[ERROR] No se pudo agregar FD " << listenSocket << " a epoll: " << strerror(errno) << "\n";
+	// Añadir a epoll
+	if (epoll_ctl(epollFd, EPOLL_CTL_ADD, fd, &event) != 0) {
+		cerr << "[ERROR] No se pudo agregar FD " << fd << " a epoll: "
+			 << strerror(errno) << "\n";
+		delete callback; // Limpiar si falla
 		return -1;
 	}
 
-	cout << "[DEBUG] FD " << listenSocket << " agregado exitosamente a epoll\n";
+	cout << "[DEBUG] FD " << fd << " agregado exitosamente a epoll\n";
 	return 0;
 }
 
 int acceptNewClient(int serverSocket, int epollFd) {
-	struct sockaddr_in clientAddres;
-	socklen_t client_len = sizeof(clientAddres);
+	struct sockaddr_in clientAddress;
+	socklen_t client_len = sizeof(clientAddress);
 
-	int clientFd = accept(serverSocket, (struct sockaddr *)&clientAddres, &client_len);
+	int clientFd = accept(serverSocket, (struct sockaddr *)&clientAddress, &client_len);
 
 	if (clientFd < 0) {
 		if (errno == EAGAIN || errno == EWOULDBLOCK) {
-			// No hay mas conexiones pendientes
 			return 0;
 		}
 		cerr << "[ERROR] Error en accept\n";
 		return -1;
 	}
+
+	// Configurar como no bloqueante
 	int flags = fcntl(clientFd, F_GETFL, 0);
 	if (flags < 0) {
 		cerr << "[ERROR] Error obteniendo flags del socket cliente\n";
@@ -92,13 +249,16 @@ int acceptNewClient(int serverSocket, int epollFd) {
 		return -1;
 	}
 
-	if (addSocketToEpoll(epollFd, clientFd) < 0) {
+	// ===== CREAR CALLBACK PARA EL CLIENTE =====
+	int *epollFd_ptr = new int(epollFd); // ← Crear en heap
+	if (addToEpoll(epollFd, clientFd, handleClientEvent, epollFd_ptr) < 0) {
+		cerr << "[ERROR] No se pudo agregar cliente a epoll\n";
+		delete epollFd_ptr;
 		close(clientFd);
 		return -1;
 	}
 
 	cout << "[SERVER] Cliente conectado (FD " << clientFd << ")\n";
-
 	return clientFd;
 }
 
@@ -158,92 +318,76 @@ void processCommands(int clientFd) {
 	}
 }
 
-void handleCommand(int clientFd, string command) {
-	cout << "[COMMAND] Cliente " << clientFd << ": " << command << "\n";
-
-	// TODO: Implementar lógica de comandos
-	if (command == "EXIT") {
-		cout << "[SERVER] CERRANDO SERVIDOR.\n";
-		closeServer();
-	} else if (command == "ADD") {
-		cout << "[SERVER] LOGICA DE URL AÑADIR MUSICA DE YOUTUBE...\n";
-	} else if (command == "SKIP") {
-		cout << "[ACTION] Saltando canción...\n";
-	} else if (command.find("VOLUME") == 0) {
-		cout << "[ACTION] Cambiando volumen...\n";
-	} else {
-	}
-}
-
-void closeServer() {
-	serverRunning = false;
-}
-
 int mainloop(int &serverSocket) {
 	cout << "[DEBUG] Creando epoll\n";
 	int epollFd = crearEpoll();
 	cout << "[DEBUG] Epoll creado! " << epollFd << "\n";
+
 	if (epollFd < 0) {
 		cerr << "[ERROR] No se pudo crear epoll\n";
 		return -1;
 	}
+
 	cout << "[DEBUG] añadiendo el server a epoll\n";
-	if (addSocketToEpoll(epollFd, serverSocket) < 0) {
+
+	// ===== AÑADIR SERVER SOCKET CON CALLBACK =====
+	int *epollFd_ptr = new int(epollFd); // ← Crear en heap
+	if (addToEpoll(epollFd, serverSocket, handleServerEvent, epollFd_ptr) < 0) {
 		cerr << "[ERROR] No se pudo añadir server a epoll\n";
+		delete epollFd_ptr;
 		close(epollFd);
 		return -1;
 	}
+	// inicializar los comandos jajajaj
+	initializeCommandHandlers();
+	// ===== INICIALIZAR WORKERS =====
+	if (!initializeWorkers(epollFd)) {
+		cerr << "[ERROR] No se pudieron inicializar workers\n";
+		close(epollFd);
+		return -1;
+	}
+
 	struct epoll_event events[200];
 	serverRunning = true;
+
 	cout << "[SERVER] SERVIDOR CREADO Y ESPERANDO...\n";
+
+	// ===== MAINLOOP SIMPLIFICADO =====
 	while (serverRunning) {
 		int nfds = epoll_wait(epollFd, events, 200, -1);
+
 		if (nfds < 0) {
 			cerr << "[ERROR] Error en epoll_wait\n";
 			break;
 		}
+
 		// Procesar todos los eventos
 		for (int i = 0; i < nfds; i++) {
-			int connectionFd = events[i].data.fd;
-			uint32_t event = events[i].events;
-			// Evento en el servidor = nueva conexión
-			if (connectionFd == serverSocket) {
-				// Aceptar todas las conexiones pendientes
-				while (true) {
-					if (acceptNewClient(serverSocket, epollFd) < 1) {
-						break;
-					}
-				}
-				continue;
-			}
-			if (event & EPOLLIN) {
-				int isMessage = receiveFromClient(connectionFd, epollFd);
-				if (isMessage == 1) {
-					processCommands(connectionFd);
-				} else if (isMessage == 0) {
-					continue;
-				} else {
-					epoll_ctl(epollFd, EPOLL_CTL_DEL, connectionFd, nullptr);
-					close(connectionFd);
-					clientBuffers.erase(connectionFd);
-					cout << "[INFO] Cliente " << connectionFd << " desconectado\n";
-				}
-			}
-			if (event & EPOLLOUT) {
-				continue;
-			}
+			EpollCallbackData *callback = (EpollCallbackData *)events[i].data.ptr;
+
+			// Ejecutar el handler correspondiente
+			callback->handler(callback->fd, callback->data);
 		}
-		if (!serverRunning) break;
 	}
+
+	// ===== CLEANUP =====
+	cout << "[Server] Cerrando servidor...\n";
+
+	// Cerrar workers
+	for (auto &worker : workers) {
+		WorkerMessage shutdown;
+		shutdown.type = MSG_SHUTDOWN;
+		writeWorkerMessage(worker.pipe_write_fd, shutdown);
+		close(worker.pipe_write_fd);
+		close(worker.pipe_read_fd);
+	}
+
+	// Cerrar clientes
 	for (auto &pair : clientBuffers) {
-		int clientFd = pair.first;
-		cout << "[SERVER] Cerrando cliente " << clientFd << "\n";
-		epoll_ctl(epollFd, EPOLL_CTL_DEL, clientFd, nullptr);
-		close(clientFd);
+		close(pair.first);
 	}
 	clientBuffers.clear();
 
-	// Cerrar epoll
 	close(epollFd);
 	return 0;
 }
@@ -251,7 +395,8 @@ void runServer(int &serverSocket) {
 	cout << "1. TCP UPnP public server\n2. TCP Local server\n[CLIENT]: ";
 	int type;
 	cin >> type;
-    UPnPRouter router;
+	UPnPRouter router;
+
 	if (type == 1) {
 		int internalPort;
 		connectUPnP(serverSocket, 15069, router);
@@ -259,7 +404,7 @@ void runServer(int &serverSocket) {
 		connectLocal(serverSocket);
 	}
 	mainloop(serverSocket);
-    closeRouterPort(router, 15069);
-    close(serverSocket);
+	closeRouterPort(router, 15069);
+	close(serverSocket);
 	return;
 }

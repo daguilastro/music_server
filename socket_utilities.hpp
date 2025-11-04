@@ -15,6 +15,13 @@
 using namespace std;
 
 
+// Estructura para los callbacks de epoll
+struct EpollCallbackData {
+    int fd;                                    // FD que disparó el evento
+    void (*handler)(int fd, void* data);       // Función a ejecutar
+    void* data;                                // Datos adicionales para el handler
+};
+
 struct UPnPURL{
     string ip;
     int port;
