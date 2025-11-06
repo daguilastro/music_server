@@ -20,13 +20,18 @@ using namespace std;
 // Message structure for pipe communication
 struct WorkerMessage {
     uint8_t type;
-    uint32_t request_id;
     uint32_t data_length;
     char data[512];
     
-    WorkerMessage() : type(MSG_FINISHED), request_id(0), data_length(0) {
+    WorkerMessage() : type(MSG_FINISHED), data_length(0) {
         data[0] = '\0';
     }
+};
+
+
+struct DownloadRequest {
+    string url;
+    int clientFd;
 };
 
 // Worker information structure (for server use)
@@ -35,10 +40,12 @@ struct WorkerInfo {
     int pipe_read_fd;
     int pipe_write_fd;
     int state;
-    uint32_t current_request_id;
+    DownloadRequest currentRequest;
     
     WorkerInfo() : pid(-1), pipe_read_fd(-1), pipe_write_fd(-1), 
-                   state(WORKER_IDLE), current_request_id(0) {}
+                   state(WORKER_IDLE) {
+        currentRequest.clientFd = -1;
+    }
 };
 
 // Funciones

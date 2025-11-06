@@ -69,7 +69,7 @@ int receiveFromClient(int clientFd, int epollFd) {
 	char buffer[1024];
 	while (true) {
 		ssize_t bytes_recv = recv(clientFd, buffer, sizeof(buffer), 0);
-
+		
 		if (bytes_recv > 0) { // hay datos
 			// Protección contra buffer overflow
 			if (clientBuffers[clientFd].size() + bytes_recv > 16 * 1024) {

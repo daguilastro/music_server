@@ -1,6 +1,7 @@
 #pragma once
 #include <map>
 #include <string>
+#include "../worker/worker_manager.hpp"
 
 using namespace std;
 

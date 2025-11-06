@@ -3,15 +3,13 @@
 #include <iostream>
 #include <unistd.h>
 #include <fcntl.h>
-#include <sys/types.h>
+#include <sys/socket.h>
 #include <cstring>
 
 using namespace std;
 
-// Variables globales
 vector<WorkerInfo> workers;
-queue<string> downloadQueue;
-uint32_t nextRequestId = 1;
+queue<DownloadRequest> downloadQueue;
 
 bool initializeWorkers(int epollFd, int numWorkers) {
     cout << "[Server] Inicializando " << numWorkers << " workers..." << endl;
@@ -26,43 +24,38 @@ bool initializeWorkers(int epollFd, int numWorkers) {
         }
 
         pid_t pid = fork();
-
         if (pid == -1) {
             perror("fork");
             return false;
         }
 
         if (pid == 0) {
-            // ===== PROCESO HIJO (WORKER) =====
             close(pipeToWorker[1]);
             close(pipeFromWorker[0]);
             workerProcess(pipeToWorker[0], pipeFromWorker[1], i);
             exit(0);
         }
 
-        // ===== PROCESO PADRE (SERVIDOR) =====
         close(pipeToWorker[0]);
         close(pipeFromWorker[1]);
 
-        // Configurar como no bloqueante
         int flags = fcntl(pipeFromWorker[0], F_GETFL, 0);
         fcntl(pipeFromWorker[0], F_SETFL, flags | O_NONBLOCK);
 
-        // Crear WorkerInfo
         WorkerInfo worker;
         worker.pid = pid;
         worker.pipe_read_fd = pipeFromWorker[0];
         worker.pipe_write_fd = pipeToWorker[1];
         worker.state = WORKER_IDLE;
-        worker.current_request_id = 0;
         workers.push_back(worker);
 
-        // ===== AÑADIR WORKER A EPOLL CON CALLBACK =====
-        // Necesitamos declarar addToEpoll (está en epoll_handler)
         extern int addToEpoll(int epollFd, int fd, void (*handler)(int, void*), void* data);
         
-        if (addToEpoll(epollFd, pipeFromWorker[0], handleWorkerEvent, &workers.back()) < 0) {
+        // ===== PASAR EL ÍNDICE EN LUGAR DEL PUNTERO =====
+        int* workerIndex = new int(i);  // Guardar el índice en el heap
+        if (addToEpoll(epollFd, pipeFromWorker[0], handleWorkerEvent, workerIndex) < 0) {
             cerr << "[ERROR] No se pudo añadir worker a epoll\n";
+            delete workerIndex;
             return false;
         }
 
@@ -74,7 +67,12 @@ bool initializeWorkers(int epollFd, int numWorkers) {
 }
 
 void handleWorkerEvent(int fd, void* data) {
-    WorkerInfo* worker = static_cast<WorkerInfo*>(data);
+    // ===== RECUPERAR EL WORKER POR ÍNDICE =====
+    int workerIndex = *(int*)data;
+    WorkerInfo* worker = &workers[workerIndex];
+
+    cout << "[DEBUG] handleWorkerEvent llamado para worker " << workerIndex 
+         << " (PID: " << worker->pid << ")" << endl;
 
     WorkerMessage response;
     if (!readWorkerMessage(fd, response)) {
@@ -82,32 +80,49 @@ void handleWorkerEvent(int fd, void* data) {
         return;
     }
 
-    // Procesar mensaje FINISHED
     if (response.type == MSG_FINISHED) {
-        cout << "[Server] Worker " << worker->pid << " terminó request "
-             << response.request_id << ": " << response.data << endl;
+        string url(response.data, response.data_length);
+        cout << "[Server] Worker " << worker->pid << " terminó: " << url << endl;
 
-        // Marcar worker como IDLE
+        cout << "[DEBUG] worker->currentRequest.url = " << worker->currentRequest.url << endl;
+        cout << "[DEBUG] worker->currentRequest.clientFd = " << worker->currentRequest.clientFd << endl;
+
+        int clientFd = worker->currentRequest.clientFd;
+        
+        if (clientFd > 0) {
+            string msg = "Descarga completada: " + url + "\n";
+            ssize_t sent = send(clientFd, msg.c_str(), msg.length(), 0);
+            
+            if (sent > 0) {
+                cout << "[Server] Respuesta enviada a cliente " << clientFd 
+                     << " (" << sent << " bytes)" << endl;
+            } else {
+                cerr << "[Server] Error enviando a cliente " << clientFd 
+                     << ": " << strerror(errno) << endl;
+            }
+        } else {
+            cerr << "[Server] clientFd inválido: " << clientFd << endl;
+        }
+
         worker->state = WORKER_IDLE;
-        worker->current_request_id = 0;
-
-        // Intentar asignar más trabajo
+        worker->currentRequest.clientFd = -1;
         assignPendingDownloads();
-    } else {
-        cerr << "[Server] Tipo de mensaje inesperado de worker" << endl;
     }
 }
 
-void submitDownload(const string& url) {
-    cout << "[Server] Añadiendo a cola de descargas: " << url << endl;
-    downloadQueue.push(url);
+void submitDownload(const string& url, int clientFd) {
+    cout << "[Server] Añadiendo a cola: " << url << " (cliente: " << clientFd << ")" << endl;
+    
+    DownloadRequest req;
+    req.url = url;
+    req.clientFd = clientFd;
+    
+    downloadQueue.push(req);
     assignPendingDownloads();
 }
 
 void assignPendingDownloads() {
-    // Mientras haya trabajo pendiente y workers libres
     while (!downloadQueue.empty()) {
-        // Buscar un worker IDLE
         WorkerInfo* idleWorker = nullptr;
         for (auto& worker : workers) {
             if (worker.state == WORKER_IDLE) {
@@ -116,36 +131,35 @@ void assignPendingDownloads() {
             }
         }
 
-        // Si no hay workers libres, salir
         if (idleWorker == nullptr) {
             cout << "[Server] No hay workers libres, " << downloadQueue.size() 
                  << " descargas en cola" << endl;
             break;
         }
 
-        // Obtener la siguiente URL de la cola
-        string url = downloadQueue.front();
+        DownloadRequest req = downloadQueue.front();
         downloadQueue.pop();
 
-        // Crear mensaje para el worker
         WorkerMessage request;
         request.type = MSG_REQUEST;
-        request.request_id = nextRequestId++;
-        request.data_length = url.length();
-        memcpy(request.data, url.c_str(), request.data_length);
+        request.data_length = req.url.length();
+        memcpy(request.data, req.url.c_str(), request.data_length);
         request.data[request.data_length] = '\0';
 
-        // Enviar al worker
+        idleWorker->currentRequest = req;
+        
+        cout << "[DEBUG] Guardado en worker PID=" << idleWorker->pid 
+             << " -> url=" << idleWorker->currentRequest.url
+             << ", clientFd=" << idleWorker->currentRequest.clientFd << endl;
+
         if (writeWorkerMessage(idleWorker->pipe_write_fd, request)) {
             idleWorker->state = WORKER_BUSY;
-            idleWorker->current_request_id = request.request_id;
-            cout << "[Server] Asignado request " << request.request_id 
-                 << " al worker " << idleWorker->pid << ": " << url << endl;
+            cout << "[Server] Asignado al worker " << idleWorker->pid 
+                 << ": " << req.url << endl;
         } else {
-            cerr << "[ERROR] No se pudo enviar request al worker " 
-                 << idleWorker->pid << endl;
-            // Volver a poner en la cola
-            downloadQueue.push(url);
+            cerr << "[ERROR] No se pudo enviar request al worker\n";
+            downloadQueue.push(req);
+            idleWorker->currentRequest.clientFd = -1;
             break;
         }
     }
@@ -160,7 +174,6 @@ void shutdownWorkers() {
         writeWorkerMessage(worker.pipe_write_fd, shutdown);
         close(worker.pipe_write_fd);
         close(worker.pipe_read_fd);
-        cout << "[Server] Worker " << worker.pid << " cerrado" << endl;
     }
     
     workers.clear();

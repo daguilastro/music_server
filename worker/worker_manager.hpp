@@ -9,12 +9,12 @@ using namespace std;
 
 // Variables globales
 extern vector<WorkerInfo> workers;
-extern queue<string> downloadQueue;
+extern queue<DownloadRequest> downloadQueue;
 extern uint32_t nextRequestId;
 
 // Funciones
 bool initializeWorkers(int epollFd, int numWorkers = 4);
-void submitDownload(const string& url);
+void submitDownload(const string& url, int clientFd);
 void assignPendingDownloads();
 void shutdownWorkers();
 
