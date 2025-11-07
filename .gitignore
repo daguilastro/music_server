@@ -1,0 +1,109 @@
+# ===== Archivos compilados =====
+*.o
+*.out
+*.exe
+*.so
+*.dylib
+*.a
+
+# ===== Directorios de build =====
+obj/
+bin/
+build/
+cmake-build-*/
+
+# ===== Archivos de database =====
+music_database.bin
+*.bin
+
+# ===== Archivos de música =====
+*.mp3
+*.flac
+*.wav
+*.m4a
+*.ogg
+*.opus
+downloads/
+music/
+songs/
+
+# ===== Archivos temporales =====
+*.tmp
+*.temp
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ===== Logs =====
+*.log
+logs/
+
+# ===== IDEs y editores =====
+# VSCode
+.vscode/
+*.code-workspace
+
+# CLion / IntelliJ
+.idea/
+*.iml
+cmake-build-*/
+
+# Vim
+*.swp
+*.swo
+*.swn
+.vim/
+
+# Emacs
+*~
+\#*\#
+.\#*
+
+# Sublime Text
+*.sublime-project
+*.sublime-workspace
+
+# ===== Sistema =====
+.DS_Store
+*.DS_Store
+Thumbs.db
+desktop.ini
+
+# ===== Dependencias / librerías =====
+lib/
+libs/
+vendor/
+node_modules/
+
+# ===== Core dumps =====
+core
+core.*
+vgcore.*
+
+# ===== Archivos de configuración locales =====
+config.local
+*.local
+.env
+
+# ===== Backups =====
+*.bak
+*.backup
+*~
+
+# ===== Testing =====
+test_output/
+*.test
+
+# ===== Específico del proyecto =====
+# Ejecutables del proyecto
+server
+client
+test_database
+
+# Archivos generados por UPnP
+upnp_mappings.txt
+
+# Archivos de debug
+*.dSYM/
