@@ -11,15 +11,21 @@
 using namespace std;
 
 string receiveResponse(int sockfd) {
-    char buf[2048];  // Aumentado para respuestas grandes
-    memset(buf, 0, sizeof(buf));
+    char buf[4096];
+    memset(buf, 0, sizeof(buf));  // Limpia todo
     ssize_t bytes = recv(sockfd, buf, sizeof(buf) - 1, 0);
     
     if (bytes <= 0) {
         return "";
     }
     
-    return string(buf);
+    buf[bytes] = '\0';  // Asegura terminación
+    string response(buf);
+    
+    // Limpia espacios y saltos finales
+    response.erase(response.find_last_not_of("\n\r\t ") + 1);
+    
+    return response;
 }
 
 void sendCommand(int sockfd, const string& command) {
