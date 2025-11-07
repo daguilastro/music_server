@@ -2,6 +2,7 @@
 #include <string>
 #include <cstring>
 #include <sstream>
+#include <vector>
 #include <unistd.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -10,7 +11,7 @@
 using namespace std;
 
 string receiveResponse(int sockfd) {
-    char buf[512];
+    char buf[2048];  // Aumentado para respuestas grandes
     memset(buf, 0, sizeof(buf));
     ssize_t bytes = recv(sockfd, buf, sizeof(buf) - 1, 0);
     
@@ -26,10 +27,83 @@ void sendCommand(int sockfd, const string& command) {
     send(sockfd, cmd.c_str(), cmd.size(), 0);
 }
 
+void displaySongInfo(const string& response) {
+    // Formato: SONG id|title|artist|filename|url|duration|offset
+    
+    if (response.find("SONG ") != 0) {
+        cout << "❌ Respuesta inválida del servidor" << endl;
+        return;
+    }
+    
+    // Quitar "SONG "
+    string data = response.substr(5);
+    
+    // Parsear campos separados por |
+    vector<string> fields;
+    stringstream ss(data);
+    string field;
+    
+    while (getline(ss, field, '|')) {
+        fields.push_back(field);
+    }
+    
+    if (fields.size() != 7) {
+        cout << "❌ Formato de respuesta incorrecto" << endl;
+        return;
+    }
+    
+    // Mostrar información
+    cout << "\n╔════════════════════════════════════════════════════════════╗" << endl;
+    cout << "║                    INFORMACIÓN DE CANCIÓN                  ║" << endl;
+    cout << "╠════════════════════════════════════════════════════════════╣" << endl;
+    cout << "║ ID:         " << fields[0] << endl;
+    cout << "║ Título:     " << fields[1] << endl;
+    cout << "║ Artista:    " << fields[2] << endl;
+    cout << "║ Archivo:    " << fields[3] << endl;
+    cout << "║ URL:        " << fields[4] << endl;
+    cout << "║ Duración:   " << fields[5] << " segundos" << endl;
+    cout << "║ Offset:     " << fields[6] << " bytes" << endl;
+    cout << "╚════════════════════════════════════════════════════════════╝" << endl;
+}
+
+void handleGetCommand(int sockfd) {
+    string songId;
+    
+    cout << "\nID de la canción: ";
+    getline(cin, songId);
+    
+    if (songId.empty()) {
+        cout << "[ERROR] ID no puede estar vacío\n";
+        return;
+    }
+    
+    cout << "[CLIENT] Consultando canción ID: " << songId << "..." << endl;
+    
+    sendCommand(sockfd, "GET " + songId);
+    
+    string response = receiveResponse(sockfd);
+    
+    if (response.find("ERROR") != string::npos) {
+        if (response.find("song_not_found") != string::npos) {
+            cout << "❌ Canción no encontrada con ID: " << songId << endl;
+        } else if (response.find("invalid_id") != string::npos) {
+            cout << "❌ ID inválido" << endl;
+        } else {
+            cout << "❌ Error: " << response;
+        }
+        return;
+    }
+    
+    if (response.find("SONG ") == 0) {
+        displaySongInfo(response);
+    } else {
+        cout << "[SERVER] " << response;
+    }
+}
+
 void handleAddCommand(int sockfd) {
     string url, title, artist, filename, duration;
     
-    // ===== PASO 1: Pedir URL y verificar con servidor =====
     cout << "\nURL de la canción: ";
     getline(cin, url);
     
@@ -42,6 +116,7 @@ void handleAddCommand(int sockfd) {
     sendCommand(sockfd, "ADD " + url);
     
     string response = receiveResponse(sockfd);
+    cout << "[SERVER] " << response;
     
     if (response.find("DUPLICATE") != string::npos) {
         cout << "❌ Esta canción ya existe en la base de datos\n";
@@ -49,13 +124,12 @@ void handleAddCommand(int sockfd) {
     }
     
     if (response.find("OK_ADD") == string::npos) {
-        cout << "❌ Error del servidor: " << response;
+        cout << "❌ Error del servidor\n";
         return;
     }
     
     cout << "✅ URL válida, ingrese los campos:\n" << endl;
     
-    // ===== PASO 2: Pedir campos localmente (en el cliente) =====
     cout << "Título: ";
     getline(cin, title);
     
@@ -82,7 +156,6 @@ void handleAddCommand(int sockfd) {
         duration = "0";
     }
     
-    // ===== PASO 3: Construir comando INDEX y enviar =====
     stringstream indexCmd;
     indexCmd << "INDEX " << url << "|" << title << "|" << artist << "|" 
              << filename << "|" << duration;
@@ -140,6 +213,7 @@ int main(int argc, char *argv[]) {
     cout << "\n========================================\n";
     cout << "Comandos disponibles:\n";
     cout << "  ADD      - Añadir canción\n";
+    cout << "  GET      - Obtener canción por ID\n";
     cout << "  EXIT     - Cerrar servidor\n";
     cout << "  quit     - Desconectar cliente\n";
     cout << "========================================\n\n";
@@ -159,9 +233,130 @@ int main(int argc, char *argv[]) {
             continue;
         }
 
-        // Comando especial ADD (interactivo)
+        // ===== COMANDO ADD =====
         if (command == "ADD" || command == "add") {
             handleAddCommand(clientSocket);
+            continue;
+        }
+        
+        // ===== COMANDO GET =====
+        if (command == "GET" || command == "get") {
+            handleGetCommand(clientSocket);
+            continue;
+        }
+        
+        // Detectar si es ADD con URL
+        if (command.substr(0, 4) == "ADD " || command.substr(0, 4) == "add ") {
+            string url = command.substr(4);
+            url.erase(0, url.find_first_not_of(" \t"));
+            url.erase(url.find_last_not_of(" \t") + 1);
+            
+            if (url.empty()) {
+                cout << "[ERROR] Debe proporcionar una URL\n";
+                continue;
+            }
+            
+            cout << "[CLIENT] Verificando URL con servidor..." << endl;
+            sendCommand(clientSocket, "ADD " + url);
+            
+            string response = receiveResponse(clientSocket);
+            cout << "[SERVER] " << response;
+            
+            if (response.find("DUPLICATE") != string::npos) {
+                cout << "❌ Esta canción ya existe en la base de datos\n";
+                continue;
+            }
+            
+            if (response.find("OK_ADD") == string::npos) {
+                cout << "❌ Error del servidor\n";
+                continue;
+            }
+            
+            cout << "✅ URL válida, ingrese los campos:\n" << endl;
+            
+            string title, artist, filename, duration;
+            
+            cout << "Título: ";
+            getline(cin, title);
+            
+            if (title.empty()) {
+                cout << "[ERROR] Título no puede estar vacío\n";
+                continue;
+            }
+            
+            cout << "Artista (opcional, Enter para omitir): ";
+            getline(cin, artist);
+            
+            cout << "Nombre de archivo: ";
+            getline(cin, filename);
+            
+            if (filename.empty()) {
+                cout << "[ERROR] Nombre de archivo no puede estar vacío\n";
+                continue;
+            }
+            
+            cout << "Duración (segundos): ";
+            getline(cin, duration);
+            
+            if (duration.empty()) {
+                duration = "0";
+            }
+            
+            stringstream indexCmd;
+            indexCmd << "INDEX " << url << "|" << title << "|" << artist << "|" 
+                     << filename << "|" << duration;
+            
+            cout << "\n[CLIENT] Enviando datos al servidor..." << endl;
+            sendCommand(clientSocket, indexCmd.str());
+            
+            response = receiveResponse(clientSocket);
+            
+            if (response.find("INDEXED") != string::npos) {
+                cout << "✅ Canción añadida exitosamente!" << endl;
+                cout << "[SERVER] " << response << endl;
+            } else if (response.find("ERROR") != string::npos) {
+                cout << "❌ Error al añadir canción: " << response;
+            } else {
+                cout << "[SERVER] " << response;
+            }
+            
+            continue;
+        }
+        
+        // Detectar si es GET con ID
+        if (command.substr(0, 4) == "GET " || command.substr(0, 4) == "get ") {
+            string songId = command.substr(4);
+            songId.erase(0, songId.find_first_not_of(" \t"));
+            songId.erase(songId.find_last_not_of(" \t\r\n") + 1);
+            
+            if (songId.empty()) {
+                cout << "[ERROR] Debe proporcionar un ID\n";
+                continue;
+            }
+            
+            cout << "[CLIENT] Consultando canción ID: " << songId << "..." << endl;
+            
+            sendCommand(clientSocket, "GET " + songId);
+            
+            string response = receiveResponse(clientSocket);
+            
+            if (response.find("ERROR") != string::npos) {
+                if (response.find("song_not_found") != string::npos) {
+                    cout << "❌ Canción no encontrada con ID: " << songId << endl;
+                } else if (response.find("invalid_id") != string::npos) {
+                    cout << "❌ ID inválido" << endl;
+                } else {
+                    cout << "❌ Error: " << response;
+                }
+                continue;
+            }
+            
+            if (response.find("SONG ") == 0) {
+                displaySongInfo(response);
+            } else {
+                cout << "[SERVER] " << response;
+            }
+            
             continue;
         }
 

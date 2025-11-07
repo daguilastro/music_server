@@ -40,6 +40,26 @@ bool isDuplicateURL(SongDatabase* db, const char* url) {
     return false;
 }
 
+long getSongOffsetInFile(SongDatabase* db, uint32_t id) {
+    // Encontrar índice de la canción
+    int index = -1;
+    for (int i = 0; i < db->songCount; i++) {
+        if (db->songs[i].id == id) {
+            index = i;
+            break;
+        }
+    }
+    
+    if (index < 0) {
+        return -1;  // No encontrada
+    }
+    
+    // Calcular offset: header + (índice × tamaño de Song)
+    long offset = sizeof(DatabaseHeader) + (index * sizeof(Song));
+    
+    return offset;
+}
+
 // ===== AÑADIR CANCIÓN =====
 int addSong(SongDatabase* db, const char* title, const char* filename,
             const char* url, const char* artist, uint32_t duration) {

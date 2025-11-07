@@ -3,6 +3,7 @@
 #include <string>
 #include "../worker/worker_manager.hpp"
 #include "../server/server.hpp"
+#include "../indexation/database.hpp"
 
 using namespace std;
 
@@ -14,4 +15,5 @@ void initializeCommandHandlers();
 void handleCommand(int clientFd, const string& request);
 void handleAddCommand(int clientFd, const string& args);
 void handleIndexCommand(int clientFd, const string& args);
+void handleGetCommand(int clientFd, const string& args);
 void handleExitCommand(int clientFd, const string& args);

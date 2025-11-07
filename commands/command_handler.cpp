@@ -1,4 +1,5 @@
 #include "command_handler.hpp"
+#include <cstdint>
 #include <cstdlib>
 #include <iostream>
 #include <regex>
@@ -14,6 +15,7 @@ void initializeCommandHandlers() {
     commandHandlers["ADD"] = handleAddCommand;
     commandHandlers["EXIT"] = handleExitCommand;
     commandHandlers["INDEX"] = handleIndexCommand;
+    commandHandlers["GET"] = handleGetCommand;
     cout << "[Server] Command handlers initialized" << endl;
 }
 
@@ -43,6 +45,56 @@ void handleCommand(int clientFd, const string& request) {
     } else {
         cerr << "[ERROR] Comando desconocido: " << command << endl;
     }
+}
+
+void handleGetCommand(int clientFd, const string& args) {
+    if (args.empty()) {
+        string error = "ERROR missing_id\n";
+        send(clientFd, error.c_str(), error.size(), 0);
+        return;
+    }
+    
+    int songId = atoi(args.c_str());
+    
+    if (songId <= 0) {
+        string error = "ERROR invalid_id\n";
+        send(clientFd, error.c_str(), error.size(), 0);
+        return;
+    }
+    
+    cout << "[GET] Cliente " << clientFd << " solicitó canción ID: " << songId << endl;
+    
+    // Buscar canción
+    Song* song = getSongById(globalDB, (uint32_t)songId);
+    
+    if (!song) {
+        string error = "ERROR song_not_found\n";
+        send(clientFd, error.c_str(), error.size(), 0);
+        cout << "[GET] Canción no encontrada: ID " << songId << endl;
+        return;
+    }
+    
+    // Obtener offset en el archivo
+    long offset = getSongOffsetInFile(globalDB, (uint32_t)songId);
+    
+    // Construir respuesta
+    // Formato: SONG id|title|artist|filename|url|duration|offset
+    stringstream response;
+    response << "SONG " 
+             << song->id << "|"
+             << song->title << "|"
+             << song->artist << "|"
+             << song->filename << "|"
+             << song->url << "|"
+             << song->duration << "|"
+             << offset << "\n";
+    
+    string resp = response.str();
+    send(clientFd, resp.c_str(), resp.size(), 0);
+    
+    cout << "[GET] Enviada canción: [" << song->id << "] " 
+         << song->title << " - " << song->artist 
+         << " (offset: " << offset << " bytes)" << endl;
 }
 
 void handleAddCommand(int clientFd, const string& url) {

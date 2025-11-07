@@ -74,7 +74,7 @@ int addSong(SongDatabase* db, const char* title, const char* filename,
 bool isDuplicateURL(SongDatabase* db, const char* url);
 
 // Obtener canción por ID
-Song* getSongById(SongDatabase* db, int id);
+Song* getSongById(SongDatabase* db, uint32_t id);
 
 // Información
 int getSongCount(SongDatabase* db);
@@ -82,3 +82,5 @@ int getSongCount(SongDatabase* db);
 bool saveDatabase(SongDatabase* db, const char* filepath);
 
 SongDatabase* loadDatabase(const char* filepath);
+
+long getSongOffsetInFile(SongDatabase* db, uint32_t id);
