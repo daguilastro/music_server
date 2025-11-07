@@ -1,55 +1,66 @@
 #include "server.hpp"
 
 bool serverRunning = true;
+SongDatabase *globalDB = nullptr;
 
-void runServer(int& serverSocket) {
-    cout << "1. TCP UPnP public server\n2. TCP Local server\n[CLIENT]: ";
-    int type;
-    cin >> type;
-    UPnPRouter router;
+void runServer(int &serverSocket) {
+	cout << "1. TCP UPnP public server\n2. TCP Local server\n[CLIENT]: ";
+	int type;
+	cin >> type;
+	UPnPRouter router;
 
-    if (type == 1) {
-        connectUPnP(serverSocket, 15069, router);
-    } else {
-        connectLocal(serverSocket);
-    }
-    
-    mainloop(serverSocket);
-    closeRouterPort(router, 15069);
-    close(serverSocket);
+	if (type == 1) {
+		connectUPnP(serverSocket, 15069, router);
+	} else {
+		connectLocal(serverSocket);
+	}
+
+	mainloop(serverSocket);
+	saveDatabase(globalDB, "music_database.bin");
+	freeDatabase(globalDB);
+	closeRouterPort(router, 15069);
+	close(serverSocket);
 }
 
-int mainloop(int& serverSocket) {
-    int epollFd = createEpoll();
-    if (epollFd < 0) {
-        return -1;
-    }
+int mainloop(int &serverSocket) {
+	cout << "[SERVER] Cargando base de datos..." << endl;
+	globalDB = loadDatabase("music_database.bin");
+	if (!globalDB) {
+		cerr << "[ERROR] No se pudo cargar la base de datos" << endl;
+		return -1;
+	}
+	cout << "[SERVER] Base de datos lista (" << getSongCount(globalDB) << " canciones)" << endl;
 
-    // Añadir server socket
-    int* epollFd_ptr = new int(epollFd);
-    addToEpoll(epollFd, serverSocket, handleServerEvent, epollFd_ptr);
-    
-    // Inicializar comandos y workers
-    initializeCommandHandlers();
-    initializeWorkers(epollFd);
+	int epollFd = createEpoll();
+	if (epollFd < 0) {
+		return -1;
+	}
 
-    struct epoll_event events[200];
-    serverRunning = true;
+	// Añadir server socket
+	int *epollFd_ptr = new int(epollFd);
+	addToEpoll(epollFd, serverSocket, handleServerEvent, epollFd_ptr);
 
-    cout << "[SERVER] SERVIDOR CREADO Y ESPERANDO...\n";
+	// Inicializar comandos y workers
+	initializeCommandHandlers();
+	initializeWorkers(epollFd);
 
-    while (serverRunning) {
-        int nfds = epoll_wait(epollFd, events, 200, -1);
-        
-        for (int i = 0; i < nfds; i++) {
-            EpollCallbackData* callback = (EpollCallbackData*)events[i].data.ptr;
-            callback->handler(callback->fd, callback->data);
-        }
-    }
+	struct epoll_event events[200];
+	serverRunning = true;
 
-    // Cleanup
-    shutdownWorkers();
-    closeAllClients();
-    close(epollFd);
-    return 0;
+	cout << "[SERVER] SERVIDOR CREADO Y ESPERANDO...\n";
+
+	while (serverRunning) {
+		int nfds = epoll_wait(epollFd, events, 200, -1);
+
+		for (int i = 0; i < nfds; i++) {
+			EpollCallbackData *callback = (EpollCallbackData *)events[i].data.ptr;
+			callback->handler(callback->fd, callback->data);
+		}
+	}
+
+	// Cleanup
+	shutdownWorkers();
+	closeAllClients();
+	close(epollFd);
+	return 0;
 }

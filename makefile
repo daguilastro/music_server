@@ -10,7 +10,8 @@ SRCS = main.cpp \
        network/socket_utils.cpp \
        network/upnp.cpp \
        worker/worker.cpp \
-       worker/worker_manager.cpp
+       worker/worker_manager.cpp \
+       indexation/database.cpp
 
 $(TARGET): $(SRCS)
 	$(CXX) $(CXXFLAGS) -o $(TARGET) $(SRCS)

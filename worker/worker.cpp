@@ -75,7 +75,7 @@ void workerProcess(int read_fd, int write_fd, int worker_id) {
 				"yt-dlp",
 				"-x", "--audio-format", "mp3",
 				"--extractor-args", "youtube:player_client=android",
-				"-o", "/tmp/downloads/%(title)s.%(ext)s",
+				"-o", "~/songs/%(title)s.%(ext)s",
 				url.c_str(),
 				(char *)NULL);
 
