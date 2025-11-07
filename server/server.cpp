@@ -10,7 +10,7 @@ void runServer(int &serverSocket) {
 	UPnPRouter router;
 
 	if (type == 1) {
-		connectUPnP(serverSocket, 15069, router);
+		connectUPnP(serverSocket, 8085, router);
 	} else {
 		connectLocal(serverSocket);
 	}
@@ -18,7 +18,7 @@ void runServer(int &serverSocket) {
 	mainloop(serverSocket);
 	saveDatabase(globalDB, "music_database.bin");
 	freeDatabase(globalDB);
-	closeRouterPort(router, 15069);
+	closeRouterPort(router, 8085);
 	close(serverSocket);
 }
 

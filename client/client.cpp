@@ -7,215 +7,436 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <fcntl.h>
+#include <sys/epoll.h>
 
 using namespace std;
 
-string receiveResponse(int sockfd) {
-    char buf[4096];
-    memset(buf, 0, sizeof(buf));  // Limpia todo
-    ssize_t bytes = recv(sockfd, buf, sizeof(buf) - 1, 0);
+// ===== ESTRUCTURA DE CALLBACK =====
+struct EpollCallbackData {
+    int fd;
+    void (*handler)(int fd, void* data);
+    void* data;
+};
+
+// ===== ESTADOS DEL CLIENTE =====
+enum ClientState {
+    STATE_IDLE,                 // Esperando comando
+    STATE_ADD_WAITING_URL,      // Pidiendo URL del usuario
+    STATE_ADD_WAITING_SERVER,   // Esperando respuesta OK_ADD del servidor
+    STATE_ADD_WAITING_TITLE,    // Pidiendo título
+    STATE_ADD_WAITING_ARTIST,   // Pidiendo artista
+    STATE_ADD_WAITING_FILENAME, // Pidiendo filename
+    STATE_ADD_WAITING_DURATION, // Pidiendo duración
+    STATE_ADD_SUBMITTING,       // Esperando respuesta INDEX del servidor
+    STATE_GET_WAITING_ID,       // Pidiendo ID para GET
+    STATE_GET_WAITING_RESPONSE  // Esperando respuesta GET del servidor
+};
+
+// ===== VARIABLES GLOBALES =====
+int clientSocket = -1;
+bool clientRunning = true;
+string receivedResponse = "";
+ClientState clientState = STATE_IDLE;
+
+// Datos temporales para ADD
+string tempUrl = "";
+string tempTitle = "";
+string tempArtist = "";
+string tempFilename = "";
+string tempDuration = "";
+
+// ===== FUNCIONES DE EPOLL =====
+int createEpoll() {
+    int epollFd = epoll_create1(0);
+    if (epollFd < 0) {
+        cerr << "[ERROR] No se pudo crear epoll\n";
+        return -1;
+    }
+    return epollFd;
+}
+
+int addToEpoll(int epollFd, int fd, void (*handler)(int, void*), void* data) {
+    EpollCallbackData* callback = new EpollCallbackData;
+    callback->fd = fd;
+    callback->handler = handler;
+    callback->data = data;
+
+    struct epoll_event event;
+    event.events = EPOLLIN;
+    event.data.ptr = callback;
+
+    if (epoll_ctl(epollFd, EPOLL_CTL_ADD, fd, &event) != 0) {
+        cerr << "[ERROR] No se pudo agregar FD " << fd << " a epoll\n";
+        delete callback;
+        return -1;
+    }
+
+    return 0;
+}
+
+// ===== HELPER PARA MOSTRAR PROMPT =====
+void showPrompt() {
+    cout << "> ";
+    cout.flush();
+}
+
+// ===== HANDLER DEL SERVIDOR =====
+void handleServerEvent(int fd, void* data) {
+    char buffer[4096];
+    memset(buffer, 0, sizeof(buffer));
+    
+    ssize_t bytes = recv(fd, buffer, sizeof(buffer) - 1, 0);
     
     if (bytes <= 0) {
-        return "";
-    }
-    
-    buf[bytes] = '\0';  // Asegura terminación
-    string response(buf);
-    
-    // Limpia espacios y saltos finales
-    response.erase(response.find_last_not_of("\n\r\t ") + 1);
-    
-    return response;
-}
-
-void sendCommand(int sockfd, const string& command) {
-    string cmd = command + "\n";
-    send(sockfd, cmd.c_str(), cmd.size(), 0);
-}
-
-void displaySongInfo(const string& response) {
-    // Formato: SONG id|title|artist|filename|url|duration|offset
-    
-    if (response.find("SONG ") != 0) {
-        cout << "❌ Respuesta inválida del servidor" << endl;
+        cerr << "\n[ERROR] Desconectado del servidor\n";
+        clientRunning = false;
         return;
     }
     
-    // Quitar "SONG "
-    string data = response.substr(5);
+    buffer[bytes] = '\0';
+    receivedResponse += string(buffer);
     
-    // Parsear campos separados por |
-    vector<string> fields;
-    stringstream ss(data);
-    string field;
-    
-    while (getline(ss, field, '|')) {
-        fields.push_back(field);
-    }
-    
-    if (fields.size() != 7) {
-        cout << "❌ Formato de respuesta incorrecto" << endl;
-        return;
-    }
-    
-    // Mostrar información
-    cout << "\n╔════════════════════════════════════════════════════════════╗" << endl;
-    cout << "║                    INFORMACIÓN DE CANCIÓN                  ║" << endl;
-    cout << "╠════════════════════════════════════════════════════════════╣" << endl;
-    cout << "║ ID:         " << fields[0] << endl;
-    cout << "║ Título:     " << fields[1] << endl;
-    cout << "║ Artista:    " << fields[2] << endl;
-    cout << "║ Archivo:    " << fields[3] << endl;
-    cout << "║ URL:        " << fields[4] << endl;
-    cout << "║ Duración:   " << fields[5] << " segundos" << endl;
-    cout << "║ Offset:     " << fields[6] << " bytes" << endl;
-    cout << "╚════════════════════════════════════════════════════════════╝" << endl;
-}
-
-void handleGetCommand(int sockfd) {
-    string songId;
-    
-    cout << "\nID de la canción: ";
-    getline(cin, songId);
-    
-    if (songId.empty()) {
-        cout << "[ERROR] ID no puede estar vacío\n";
-        return;
-    }
-    
-    cout << "[CLIENT] Consultando canción ID: " << songId << "..." << endl;
-    
-    sendCommand(sockfd, "GET " + songId);
-    
-    string response = receiveResponse(sockfd);
-    
-    if (response.find("ERROR") != string::npos) {
-        if (response.find("song_not_found") != string::npos) {
-            cout << "❌ Canción no encontrada con ID: " << songId << endl;
-        } else if (response.find("invalid_id") != string::npos) {
-            cout << "❌ ID inválido" << endl;
-        } else {
-            cout << "❌ Error: " << response;
+    // Procesar todas las líneas completas
+    while (true) {
+        size_t pos = receivedResponse.find('\n');
+        if (pos == string::npos) break;
+        
+        string line = receivedResponse.substr(0, pos);
+        receivedResponse = receivedResponse.substr(pos + 1);
+        
+        // Limpiar espacios finales
+        line.erase(line.find_last_not_of("\r\n\t ") + 1);
+        
+        if (line.empty()) continue;
+        
+        // ===== MENSAJES ASINCRONICOS =====
+        if (line.find("Descarga completada") != string::npos) {
+            cout << "\n[SERVER] " << line << endl;
+            if (clientState == STATE_IDLE) {
+                showPrompt();
+            }
+            continue;
         }
-        return;
-    }
-    
-    if (response.find("SONG ") == 0) {
-        displaySongInfo(response);
-    } else {
-        cout << "[SERVER] " << response;
+        
+        // ===== ESTADO: Esperando respuesta OK_ADD del servidor =====
+        if (clientState == STATE_ADD_WAITING_SERVER) {
+            if (line.find("OK_ADD") != string::npos) {
+                cout << "\n✅ URL válida, ingrese los campos:\n" << endl;
+                
+                cout << "Título: ";
+                cout.flush();
+                clientState = STATE_ADD_WAITING_TITLE;
+                
+            } else if (line.find("DUPLICATE") != string::npos) {
+                cout << "\n❌ Esta canción ya existe en la base de datos\n";
+                clientState = STATE_IDLE;
+                showPrompt();
+                
+            } else if (line.find("ERROR") != string::npos) {
+                cout << "\n❌ Error del servidor: " << line << endl;
+                clientState = STATE_IDLE;
+                showPrompt();
+            }
+            continue;
+        }
+        
+        // ===== ESTADO: Esperando respuesta INDEX (SUBMIT) =====
+        if (clientState == STATE_ADD_SUBMITTING) {
+            if (line.find("INDEXED") != string::npos) {
+                cout << "\n✅ Canción añadida exitosamente!" << endl;
+                cout << "[SERVER] " << line << endl;
+                clientState = STATE_IDLE;
+                showPrompt();
+                
+            } else if (line.find("ERROR") != string::npos) {
+                cout << "\n❌ Error al añadir canción: " << line << endl;
+                clientState = STATE_IDLE;
+                showPrompt();
+            }
+            continue;
+        }
+        
+        // ===== ESTADO: Esperando respuesta GET =====
+        if (clientState == STATE_GET_WAITING_RESPONSE) {
+            if (line.find("SONG ") == 0) {
+                // Parsear y mostrar canción
+                string data = line.substr(5);
+                vector<string> fields;
+                stringstream ss(data);
+                string field;
+                
+                while (getline(ss, field, '|')) {
+                    fields.push_back(field);
+                }
+                
+                if (fields.size() == 7) {
+                    cout << "\n╔════════════════════════════════════════════════════════════╗" << endl;
+                    cout << "║                    INFORMACIÓN DE CANCIÓN                  ║" << endl;
+                    cout << "╠════════════════════════════════════════════════════════════╣" << endl;
+                    cout << "║ ID:         " << fields[0] << endl;
+                    cout << "║ Título:     " << fields[1] << endl;
+                    cout << "║ Artista:    " << fields[2] << endl;
+                    cout << "║ Archivo:    " << fields[3] << endl;
+                    cout << "║ URL:        " << fields[4] << endl;
+                    cout << "║ Duración:   " << fields[5] << " segundos" << endl;
+                    cout << "║ Offset:     " << fields[6] << " bytes" << endl;
+                    cout << "╚════════════════════════════════════════════════════════════╝" << endl;
+                    clientState = STATE_IDLE;
+                    showPrompt();
+                }
+            } else if (line.find("ERROR") != string::npos) {
+                cout << "\n❌ " << line << endl;
+                clientState = STATE_IDLE;
+                showPrompt();
+            }
+            continue;
+        }
+        
+        // ===== ESTADO: IDLE (otros comandos) =====
+        if (clientState == STATE_IDLE) {
+            if (line.find("ERROR") != string::npos) {
+                cout << "\n❌ Error: " << line << endl;
+            } else {
+                cout << "\n[SERVER] " << line << endl;
+            }
+            showPrompt();
+        }
     }
 }
 
-void handleAddCommand(int sockfd) {
-    string url, title, artist, filename, duration;
-    
-    cout << "\nURL de la canción: ";
-    getline(cin, url);
-    
-    if (url.empty()) {
-        cout << "[ERROR] URL no puede estar vacía\n";
+// ===== HANDLER DEL STDIN =====
+void handleStdinEvent(int fd, void* data) {
+    string input;
+    if (!getline(cin, input)) {
+        clientRunning = false;
         return;
     }
     
-    cout << "[CLIENT] Verificando URL con servidor..." << endl;
-    sendCommand(sockfd, "ADD " + url);
-    
-    string response = receiveResponse(sockfd);
-    cout << "[SERVER] " << response;
-    
-    if (response.find("DUPLICATE") != string::npos) {
-        cout << "❌ Esta canción ya existe en la base de datos\n";
+    // Ignorar comandos vacíos en IDLE
+    if (input.empty() && clientState == STATE_IDLE) {
+        showPrompt();
         return;
     }
     
-    if (response.find("OK_ADD") == string::npos) {
-        cout << "❌ Error del servidor\n";
+    // ===== PARSEAR COMANDO Y PARÁMETROS =====
+    string command = input;
+    string param = "";
+    
+    size_t spacePos = input.find(' ');
+    if (spacePos != string::npos) {
+        command = input.substr(0, spacePos);
+        param = input.substr(spacePos + 1);
+        
+        // Limpiar espacios iniciales del parámetro
+        param.erase(0, param.find_first_not_of(" \t"));
+    }
+    
+    // ===== COMANDO: ADD =====
+    if ((command == "ADD" || command == "add") && clientState == STATE_IDLE) {
+        cout << "\nURL de la canción: ";
+        cout.flush();
+        
+        tempUrl = "";
+        tempTitle = "";
+        tempArtist = "";
+        tempFilename = "";
+        tempDuration = "";
+        
+        clientState = STATE_ADD_WAITING_URL;
         return;
     }
     
-    cout << "✅ URL válida, ingrese los campos:\n" << endl;
-    
-    cout << "Título: ";
-    getline(cin, title);
-    
-    if (title.empty()) {
-        cout << "[ERROR] Título no puede estar vacío\n";
+    // ===== ESTADO: Esperando URL =====
+    if (clientState == STATE_ADD_WAITING_URL) {
+        tempUrl = input;
+        
+        if (tempUrl.empty()) {
+            cout << "[ERROR] URL no puede estar vacía\n";
+            cout << "URL de la canción: ";
+            cout.flush();
+            return;
+        }
+        
+        cout << "[CLIENT] Verificando URL con servidor..." << endl;
+        string cmd = "ADD " + tempUrl + "\n";
+        send(clientSocket, cmd.c_str(), cmd.size(), 0);
+        
+        clientState = STATE_ADD_WAITING_SERVER;
         return;
     }
     
-    cout << "Artista (opcional, Enter para omitir): ";
-    getline(cin, artist);
-    
-    cout << "Nombre de archivo: ";
-    getline(cin, filename);
-    
-    if (filename.empty()) {
-        cout << "[ERROR] Nombre de archivo no puede estar vacío\n";
+    // ===== ESTADO: Esperando Título =====
+    if (clientState == STATE_ADD_WAITING_TITLE) {
+        tempTitle = input;
+        
+        if (tempTitle.empty()) {
+            cout << "[ERROR] Título no puede estar vacío\n";
+            cout << "Título: ";
+            cout.flush();
+            return;
+        }
+        
+        cout << "Artista (opcional, Enter para omitir): ";
+        cout.flush();
+        clientState = STATE_ADD_WAITING_ARTIST;
         return;
     }
     
-    cout << "Duración (segundos): ";
-    getline(cin, duration);
-    
-    if (duration.empty()) {
-        duration = "0";
+    // ===== ESTADO: Esperando Artista =====
+    if (clientState == STATE_ADD_WAITING_ARTIST) {
+        tempArtist = input;  // Puede estar vacío
+        
+        cout << "Nombre de archivo: ";
+        cout.flush();
+        clientState = STATE_ADD_WAITING_FILENAME;
+        return;
     }
     
-    stringstream indexCmd;
-    indexCmd << "INDEX " << url << "|" << title << "|" << artist << "|" 
-             << filename << "|" << duration;
+    // ===== ESTADO: Esperando Filename =====
+    if (clientState == STATE_ADD_WAITING_FILENAME) {
+        tempFilename = input;
+        
+        if (tempFilename.empty()) {
+            cout << "[ERROR] Nombre de archivo no puede estar vacío\n";
+            cout << "Nombre de archivo: ";
+            cout.flush();
+            return;
+        }
+        
+        cout << "Duración (segundos): ";
+        cout.flush();
+        clientState = STATE_ADD_WAITING_DURATION;
+        return;
+    }
     
-    cout << "\n[CLIENT] Enviando datos al servidor..." << endl;
-    sendCommand(sockfd, indexCmd.str());
+    // ===== ESTADO: Esperando Duración =====
+    if (clientState == STATE_ADD_WAITING_DURATION) {
+        tempDuration = input;
+        
+        if (tempDuration.empty()) {
+            tempDuration = "0";
+        }
+        
+        // ===== ENVIAR INDEX AL SERVIDOR =====
+        stringstream indexCmd;
+        indexCmd << "INDEX " << tempUrl << "|" << tempTitle << "|" << tempArtist << "|" 
+                 << tempFilename << "|" << tempDuration;
+        
+        cout << "\n[CLIENT] Enviando datos al servidor..." << endl;
+        string cmd = indexCmd.str() + "\n";
+        send(clientSocket, cmd.c_str(), cmd.size(), 0);
+        
+        clientState = STATE_ADD_SUBMITTING;
+        return;
+    }
     
-    response = receiveResponse(sockfd);
+    // ===== COMANDO: GET con parámetro directo =====
+    if ((command == "GET" || command == "get") && !param.empty() && clientState == STATE_IDLE) {
+        string songId = param;
+        
+        cout << "[CLIENT] Consultando canción ID: " << songId << "..." << endl;
+        string cmd = "GET " + songId + "\n";
+        send(clientSocket, cmd.c_str(), cmd.size(), 0);
+        
+        clientState = STATE_GET_WAITING_RESPONSE;
+        return;
+    }
     
-    if (response.find("INDEXED") != string::npos) {
-        cout << "✅ Canción añadida exitosamente!" << endl;
-        cout << "[SERVER] " << response;
-    } else if (response.find("ERROR") != string::npos) {
-        cout << "❌ Error al añadir canción: " << response;
-    } else {
-        cout << "[SERVER] " << response;
+    // ===== COMANDO: GET sin parámetro =====
+    if ((command == "GET" || command == "get") && param.empty() && clientState == STATE_IDLE) {
+        cout << "\nID de la canción: ";
+        cout.flush();
+        clientState = STATE_GET_WAITING_ID;
+        return;
+    }
+    
+    // ===== ESTADO: Esperando ID para GET =====
+    if (clientState == STATE_GET_WAITING_ID) {
+        string songId = input;
+        
+        if (songId.empty()) {
+            cout << "[ERROR] ID no puede estar vacío\n";
+            cout << "ID de la canción: ";
+            cout.flush();
+            return;
+        }
+        
+        cout << "[CLIENT] Consultando canción ID: " << songId << "..." << endl;
+        string cmd = "GET " + songId + "\n";
+        send(clientSocket, cmd.c_str(), cmd.size(), 0);
+        
+        clientState = STATE_GET_WAITING_RESPONSE;
+        return;
+    }
+    
+    // ===== COMANDO: QUIT =====
+    if ((command == "quit" || command == "QUIT") && clientState == STATE_IDLE) {
+        clientRunning = false;
+        return;
+    }
+    
+    // ===== OTROS COMANDOS (solo en IDLE) =====
+    if (clientState == STATE_IDLE) {
+        string cmd = input + "\n";
+        send(clientSocket, cmd.c_str(), cmd.size(), 0);
     }
 }
 
+// ===== FUNCIONES AUXILIARES =====
+bool connectToServer(const string& host, int port) {
+    clientSocket = socket(AF_INET, SOCK_STREAM, 0);
+    if (clientSocket < 0) {
+        cerr << "[ERROR] No se pudo crear socket\n";
+        return false;
+    }
+    
+    struct sockaddr_in serverAddr;
+    serverAddr.sin_family = AF_INET;
+    serverAddr.sin_port = htons(port);
+    
+    if (inet_pton(AF_INET, host.c_str(), &serverAddr.sin_addr) <= 0) {
+        cerr << "[ERROR] Dirección IP inválida\n";
+        return false;
+    }
+    
+    if (connect(clientSocket, (struct sockaddr*)&serverAddr, sizeof(serverAddr)) < 0) {
+        cerr << "[ERROR] No se pudo conectar al servidor " << strerror(errno) << "\n";
+        return false;
+    }
+    
+    // Configurar como no bloqueante
+    int flags = fcntl(clientSocket, F_GETFL, 0);
+    fcntl(clientSocket, F_SETFL, flags | O_NONBLOCK);
+    
+    cout << "[CLIENT] Conectado al servidor " << host << ":" << port << endl;
+    return true;
+}
+
+// ===== MAIN =====
 int main(int argc, char *argv[]) {
     if (argc != 3) {
-        cerr << "Uso: " << argv[0] << " <IP_SERVIDOR> <PUERTO>\n";
-        cerr << "Ejemplo: " << argv[0] << " 192.168.1.120 46505\n";
+        cerr << "Uso: " << argv[0] << " <host> <puerto>\n";
         return 1;
     }
-
-    string serverIP = argv[1];
-    int serverPort = atoi(argv[2]);
-
-    cout << "[CLIENT] Conectando a " << serverIP << ":" << serverPort << "...\n";
-
-    int clientSocket = socket(AF_INET, SOCK_STREAM, 0);
-    if (clientSocket < 0) {
-        cerr << "[ERROR] No se pudo crear socket: " << strerror(errno) << "\n";
+    
+    string host = argv[1];
+    int port = atoi(argv[2]);
+    
+    if (!connectToServer(host, port)) {
         return 1;
     }
-
-    struct sockaddr_in serverAddress;
-    serverAddress.sin_family = AF_INET;
-    serverAddress.sin_port = htons(serverPort);
-
-    if (inet_pton(AF_INET, serverIP.c_str(), &serverAddress.sin_addr) <= 0) {
-        cerr << "[ERROR] Dirección IP inválida: " << serverIP << "\n";
-        close(clientSocket);
+    
+    // Crear epoll
+    int epollFd = createEpoll();
+    if (epollFd < 0) {
         return 1;
     }
-
-    if (connect(clientSocket, (struct sockaddr *)&serverAddress, sizeof(serverAddress)) < 0) {
-        cerr << "[ERROR] No se pudo conectar al servidor: " << strerror(errno) << "\n";
-        close(clientSocket);
-        return 1;
-    }
-
-    cout << "[SUCCESS] Conectado al servidor!\n";
+    
+    // Añadir servidor y stdin a epoll
+    addToEpoll(epollFd, clientSocket, handleServerEvent, nullptr);
+    addToEpoll(epollFd, STDIN_FILENO, handleStdinEvent, nullptr);
+    
     cout << "\n========================================\n";
     cout << "Comandos disponibles:\n";
     cout << "  ADD      - Añadir canción\n";
@@ -223,166 +444,27 @@ int main(int argc, char *argv[]) {
     cout << "  EXIT     - Cerrar servidor\n";
     cout << "  quit     - Desconectar cliente\n";
     cout << "========================================\n\n";
-
-    string command;
-
-    while (true) {
-        cout << "> ";
-        getline(cin, command);
-
-        if (command == "quit" || command == "q") {
-            cout << "[CLIENT] Desconectando...\n";
+    showPrompt();
+    
+    struct epoll_event events[10];
+    
+    while (clientRunning) {
+        int nfds = epoll_wait(epollFd, events, 10, -1);
+        
+        if (nfds < 0) {
+            cerr << "[ERROR] Error en epoll_wait\n";
             break;
         }
-
-        if (command.empty()) {
-            continue;
-        }
-
-        // ===== COMANDO ADD =====
-        if (command == "ADD" || command == "add") {
-            handleAddCommand(clientSocket);
-            continue;
-        }
         
-        // ===== COMANDO GET =====
-        if (command == "GET" || command == "get") {
-            handleGetCommand(clientSocket);
-            continue;
-        }
-        
-        // Detectar si es ADD con URL
-        if (command.substr(0, 4) == "ADD " || command.substr(0, 4) == "add ") {
-            string url = command.substr(4);
-            url.erase(0, url.find_first_not_of(" \t"));
-            url.erase(url.find_last_not_of(" \t") + 1);
-            
-            if (url.empty()) {
-                cout << "[ERROR] Debe proporcionar una URL\n";
-                continue;
-            }
-            
-            cout << "[CLIENT] Verificando URL con servidor..." << endl;
-            sendCommand(clientSocket, "ADD " + url);
-            
-            string response = receiveResponse(clientSocket);
-            cout << "[SERVER] " << response;
-            
-            if (response.find("DUPLICATE") != string::npos) {
-                cout << "❌ Esta canción ya existe en la base de datos\n";
-                continue;
-            }
-            
-            if (response.find("OK_ADD") == string::npos) {
-                cout << "❌ Error del servidor\n";
-                continue;
-            }
-            
-            cout << "✅ URL válida, ingrese los campos:\n" << endl;
-            
-            string title, artist, filename, duration;
-            
-            cout << "Título: ";
-            getline(cin, title);
-            
-            if (title.empty()) {
-                cout << "[ERROR] Título no puede estar vacío\n";
-                continue;
-            }
-            
-            cout << "Artista (opcional, Enter para omitir): ";
-            getline(cin, artist);
-            
-            cout << "Nombre de archivo: ";
-            getline(cin, filename);
-            
-            if (filename.empty()) {
-                cout << "[ERROR] Nombre de archivo no puede estar vacío\n";
-                continue;
-            }
-            
-            cout << "Duración (segundos): ";
-            getline(cin, duration);
-            
-            if (duration.empty()) {
-                duration = "0";
-            }
-            
-            stringstream indexCmd;
-            indexCmd << "INDEX " << url << "|" << title << "|" << artist << "|" 
-                     << filename << "|" << duration;
-            
-            cout << "\n[CLIENT] Enviando datos al servidor..." << endl;
-            sendCommand(clientSocket, indexCmd.str());
-            
-            response = receiveResponse(clientSocket);
-            
-            if (response.find("INDEXED") != string::npos) {
-                cout << "✅ Canción añadida exitosamente!" << endl;
-                cout << "[SERVER] " << response << endl;
-            } else if (response.find("ERROR") != string::npos) {
-                cout << "❌ Error al añadir canción: " << response;
-            } else {
-                cout << "[SERVER] " << response;
-            }
-            
-            continue;
-        }
-        
-        // Detectar si es GET con ID
-        if (command.substr(0, 4) == "GET " || command.substr(0, 4) == "get ") {
-            string songId = command.substr(4);
-            songId.erase(0, songId.find_first_not_of(" \t"));
-            songId.erase(songId.find_last_not_of(" \t\r\n") + 1);
-            
-            if (songId.empty()) {
-                cout << "[ERROR] Debe proporcionar un ID\n";
-                continue;
-            }
-            
-            cout << "[CLIENT] Consultando canción ID: " << songId << "..." << endl;
-            
-            sendCommand(clientSocket, "GET " + songId);
-            
-            string response = receiveResponse(clientSocket);
-            
-            if (response.find("ERROR") != string::npos) {
-                if (response.find("song_not_found") != string::npos) {
-                    cout << "❌ Canción no encontrada con ID: " << songId << endl;
-                } else if (response.find("invalid_id") != string::npos) {
-                    cout << "❌ ID inválido" << endl;
-                } else {
-                    cout << "❌ Error: " << response;
-                }
-                continue;
-            }
-            
-            if (response.find("SONG ") == 0) {
-                displaySongInfo(response);
-            } else {
-                cout << "[SERVER] " << response;
-            }
-            
-            continue;
-        }
-
-        // Otros comandos simples
-        sendCommand(clientSocket, command);
-        string response = receiveResponse(clientSocket);
-        
-        if (!response.empty()) {
-            cout << "[SERVER] " << response;
-        }
-
-        if (command == "EXIT") {
-            cout << "[CLIENT] Servidor cerrándose...\n";
-            sleep(1);
-            break;
+        for (int i = 0; i < nfds; i++) {
+            EpollCallbackData* callback = (EpollCallbackData*)events[i].data.ptr;
+            callback->handler(callback->fd, callback->data);
         }
     }
-
+    
+    close(epollFd);
     close(clientSocket);
-    cout << "[CLIENT] Desconectado\n";
-
+    cout << "\n[CLIENT] Desconectado\n";
+    
     return 0;
 }
