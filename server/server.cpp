@@ -16,8 +16,6 @@ void runServer(int &serverSocket) {
 	}
 
 	mainloop(serverSocket);
-	saveDatabase(globalDB, "music_database.bin");
-	freeDatabase(globalDB);
 	closeRouterPort(router, 8085);
 	close(serverSocket);
 }
@@ -57,8 +55,9 @@ int mainloop(int &serverSocket) {
 			callback->handler(callback->fd, callback->data);
 		}
 	}
-
 	// Cleanup
+	saveDatabase(globalDB, "music_database.bin");
+	freeDatabase(globalDB);
 	shutdownWorkers();
 	closeAllClients();
 	close(epollFd);

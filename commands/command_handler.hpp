@@ -15,5 +15,7 @@ void initializeCommandHandlers();
 void handleCommand(int clientFd, const string& request);
 void handleAddCommand(int clientFd, const string& args);
 void handleIndexCommand(int clientFd, const string& args);
+void handleSearchCommand(int clientFd, const string& args);
+void handleBuildCommand(int clientFd, const string& args);
 void handleGetCommand(int clientFd, const string& args);
 void handleExitCommand(int clientFd, const string& args);

@@ -11,7 +11,8 @@ SRCS = main.cpp \
        network/upnp.cpp \
        worker/worker.cpp \
        worker/worker_manager.cpp \
-       indexation/database.cpp
+       indexation/database.cpp \
+       indexation/inverted_index.cpp
 
 $(TARGET): $(SRCS)
 	$(CXX) $(CXXFLAGS) -o $(TARGET) $(SRCS)
