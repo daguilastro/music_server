@@ -56,6 +56,7 @@ int mainloop(int &serverSocket) {
 		}
 	}
 	// Cleanup
+	
 	saveDatabase(globalDB, "music_database.bin");
 	freeDatabase(globalDB);
 	shutdownWorkers();

@@ -3,6 +3,7 @@
 #include <cstdint>
 #include "inverted_index.hpp"
 
+
 using namespace std;
 
 // ===== ESTRUCTURA DE CANCIÓN =====
@@ -59,6 +60,8 @@ struct SearchResult {
     int capacity;
 };
 
+extern SongDatabase* globalDB;
+
 // ===== FUNCIONES PÚBLICAS =====
 
 // Crear/liberar en memoria
@@ -66,8 +69,7 @@ SongDatabase* createDatabase();
 void freeDatabase(SongDatabase* db);
 
 // Añadir canción
-int addSong(SongDatabase* db, const char* title, const char* filename,
-            const char* url, const char* artist, uint32_t duration);
+int addSong(SongDatabase* db, Song song);
 
 // Verificar duplicados
 bool isDuplicateURL(SongDatabase* db, const char* url);
@@ -86,3 +88,4 @@ void freeSearchResult(SearchResult* result);
 // ===== PERSISTENCIA =====
 bool saveDatabase(SongDatabase* db, const char* filepath);
 SongDatabase* loadDatabase(const char* filepath);
+void indexSong(Song song);

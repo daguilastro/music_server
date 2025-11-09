@@ -19,10 +19,6 @@ string receivedResponse = "";
 ClientState clientState = STATE_IDLE;
 
 string tempUrl = "";
-string tempTitle = "";
-string tempArtist = "";
-string tempFilename = "";
-string tempDuration = "";
 string tempQuery = "";
 
 // ===== ESTRUCTURA DE CALLBACK =====
@@ -115,7 +111,6 @@ int main(int argc, char *argv[]) {
     cout << "  ADD       - Añadir canción\n";
     cout << "  GET       - Obtener canción por ID\n";
     cout << "  SEARCH    - Buscar canciones\n";
-    cout << "  BUILD     - Añadir canciones de prueba\n";
     cout << "  EXIT      - Cerrar servidor\n";
     cout << "  quit      - Desconectar cliente\n";
     cout << "========================================\n\n";

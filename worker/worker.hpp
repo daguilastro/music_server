@@ -5,6 +5,11 @@
 #include <cstdint>
 #include <unistd.h>
 #include <iostream>
+#include "../indexation/database.hpp"
+#include <cstring>
+#include <sys/wait.h>
+#include <cerrno>
+
 
 using namespace std;
 
@@ -16,12 +21,13 @@ using namespace std;
 #define MSG_REQUEST  1
 #define MSG_FINISHED 2
 #define MSG_SHUTDOWN 3
+#define MSG_METADATA 4
 
 // Message structure for pipe communication
 struct WorkerMessage {
     uint8_t type;
     uint32_t data_length;
-    char data[512];
+    char data[2048];
     
     WorkerMessage() : type(MSG_FINISHED), data_length(0) {
         data[0] = '\0';

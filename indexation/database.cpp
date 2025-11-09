@@ -73,8 +73,7 @@ long getSongOffsetInFile(SongDatabase *db, uint32_t id) {
 }
 
 // ===== AÑADIR CANCIÓN =====
-int addSong(SongDatabase *db, const char *title, const char *filename,
-	const char *url, const char *artist, uint32_t duration) {
+int addSong(SongDatabase *db, Song songSent) {
 	if (db->songCount >= db->songCapacity) {
 		db->songCapacity *= 2;
 		Song *newSongs = new Song[db->songCapacity];
@@ -83,59 +82,48 @@ int addSong(SongDatabase *db, const char *title, const char *filename,
 		db->songs = newSongs;
 	}
 
-	Song *song = &db->songs[db->songCount++];
-	song->id = db->nextSongId++;
-
-	strncpy(song->title, title, sizeof(song->title) - 1);
-	song->title[sizeof(song->title) - 1] = '\0';
-
-	strncpy(song->artist, artist, sizeof(song->artist) - 1);
-	song->artist[sizeof(song->artist) - 1] = '\0';
-
-	strncpy(song->filename, filename, sizeof(song->filename) - 1);
-	song->filename[sizeof(song->filename) - 1] = '\0';
-
-	strncpy(song->url, url, sizeof(song->url) - 1);
-	song->url[sizeof(song->url) - 1] = '\0';
-
-	song->duration = duration;
+	Song *songSave = &db->songs[db->songCount++];
+	memcpy(songSave->artist, songSent.artist, sizeof(songSent.artist));
+	memcpy(songSave->title, songSent.title, sizeof(songSent.title));
+	songSave->duration = songSent.duration;
+	songSave->id = db->nextSongId++;
 
 	// ===== INDEXAR TÍTULO =====
-	cout << "[INDEX] Indexando título: \"" << title << "\"..." << endl;
+	cout << "[INDEX] Indexando título: \"" << songSave->title << "\"..." << endl;
 
 	char titleWords[50][64];
 	int titleWordCount = 0;
-	extractWords(title, titleWords, &titleWordCount, 50);
+	extractWords(songSave->title, titleWords, &titleWordCount, 50);
 
 	cout << "[INDEX] Palabras extraídas del título: " << titleWordCount << endl;
 
 	for (int i = 0; i < titleWordCount; i++) {
 		cout << "[INDEX]   - \"" << titleWords[i] << "\"" << endl;
-		addToIndex(db->titleIndex, titleWords[i], song->id);
+		addToIndex(db->titleIndex, titleWords[i], songSave->id);
 	}
 
 	// ===== INDEXAR ARTISTA =====
-	if (artist[0] != '\0' && strcmp(artist, "Unknown") != 0) {
-		cout << "[INDEX] Indexando artista: \"" << artist << "\"..." << endl;
+	if (songSave->artist[0] != '\0' && strcmp(songSave->artist, "Unknown") != 0) {
+		cout << "[INDEX] Indexando artista: \"" << songSave->artist << "\"..." << endl;
 
 		char artistWords[50][64];
 		int artistWordCount = 0;
-		extractWords(artist, artistWords, &artistWordCount, 50);
+		extractWords(songSave->artist, artistWords, &artistWordCount, 50);
 
 		cout << "[INDEX] Palabras extraídas del artista: " << artistWordCount << endl;
 
 		for (int i = 0; i < artistWordCount; i++) {
 			cout << "[INDEX]   - \"" << artistWords[i] << "\"" << endl;
-			addToIndex(db->artistIndex, artistWords[i], song->id);
+			addToIndex(db->artistIndex, artistWords[i], songSave->id);
 		}
 	}
 
-	cout << "[INFO] Canción añadida e indexada: [" << song->id << "] " << title << " - " << artist << endl;
+	cout << "[INFO] Canción añadida e indexada: [" << songSave->id << "] " << songSave->title << " - " << songSave->artist << endl;
 	cout << "[DEBUG] Estado de índices:" << endl;
 	cout << "[DEBUG]   titleIndex->count = " << db->titleIndex->count << endl;
 	cout << "[DEBUG]   artistIndex->count = " << db->artistIndex->count << endl;
 
-	return song->id;
+	return songSave->id;
 }
 
 // ===== OBTENER CANCIÓN POR ID =====
@@ -600,6 +588,26 @@ SearchResult searchSongs(SongDatabase *db, const char *query, bool searchInTitle
 	cout << "[SEARCH] Resultados totales: " << result.count << " canciones" << endl;
 
 	return result;
+}
+
+void indexSong(Song song) {
+	// Verificar NUEVAMENTE que no exista (por seguridad)
+	if (isDuplicateURL(globalDB, song.url)) {
+		string response = "ERROR duplicate_url\n";
+		cout << "[INDEX] URL duplicada (doble verificación)" << endl;
+		return;
+	}
+
+	// Añadir canción a la database (SOLO EN MEMORIA)
+	int songId = addSong(globalDB, song);
+
+	if (songId < 0) {
+		string error = "ERROR could_not_add_song\n";
+		return;
+	}
+
+	cout << "[INDEX] Canción añadida e indexada en memoria: [" << songId << "] "
+		 << song.title << " - " << song.artist << endl;
 }
 
 void freeSearchResult(SearchResult *result) {

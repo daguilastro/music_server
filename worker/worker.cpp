@@ -1,9 +1,5 @@
 #include "worker.hpp"
-#include <unistd.h>
-#include <cstring>
-#include <sys/wait.h>
-#include <cerrno>
-#include <iostream>
+#include <sys/types.h>
 
 using namespace std;
 
@@ -65,15 +61,23 @@ void workerProcess(int read_fd, int write_fd, int worker_id) {
 		string url(request.data, request.data_length);
 		cout << "[Worker " << worker_id << "] Procesando: " << url << endl;
 
+		int pipeMetadata[2];
+		pipe(pipeMetadata);
+
 		// ===== EJECUTAR YT-DLP =====
 		pid_t pid = fork();
 
 		if (pid == 0) {
-            
-			// Si falla, intentar con la ruta alternativa
+			close(pipeMetadata[0]);
+			dup2(pipeMetadata[1], STDOUT_FILENO);
+			close(pipeMetadata[1]);
+
 			execl("/usr/bin/yt-dlp",
 				"yt-dlp",
+				"--print", "before_dl:%(title)s\n%(artist,uploader)s\n%(duration)s\n",
 				"-x", "--audio-format", "mp3",
+				"--quiet",
+				"--no-warnings",
 				"--extractor-args", "youtube:player_client=android",
 				"-o", "~/songs/%(title)s.%(ext)s",
 				url.c_str(),
@@ -83,17 +87,49 @@ void workerProcess(int read_fd, int write_fd, int worker_id) {
 			cerr << "[Worker " << worker_id << "] Error ejecutando yt-dlp: "
 				 << strerror(errno) << endl;
 			exit(1);
-		} else if (pid > 0) {
+		} 
+		else if (pid > 0) {
 			// Proceso padre: esperar a que termine yt-dlp
 			int status;
+			close(pipeMetadata[1]);
+
+			char metadata[2048];
+			ssize_t bytesMetadata = 0;
+			while (bytesMetadata < (ssize_t)sizeof(metadata)) {
+				ssize_t bytesRead = read(pipeMetadata[0], metadata, sizeof(metadata));
+				if (bytesRead < 0) {
+					cerr << "error" << strerror(errno) << endl;
+				}
+				if (bytesRead == 0) {
+					break;
+				}
+				bytesMetadata += bytesRead;
+			}
+			close(pipeMetadata[0]);
+
+			WorkerMessage messageMetadata;
+			
+			memcpy(metadata + bytesMetadata, url.c_str(), url.size());
+			bytesMetadata += url.length();
+			messageMetadata.type = MSG_METADATA;
+			memcpy(messageMetadata.data, metadata, bytesMetadata);
+			messageMetadata.data_length = bytesMetadata;
+
+			if (!writeWorkerMessage(write_fd, messageMetadata)) {
+				cerr << "[Worker " << worker_id << "] Error enviando metadatos" << endl;
+				break;
+			}
+
 			waitpid(pid, &status, 0);
+			close(pipeMetadata[0]);
 
 			if (WIFEXITED(status) && WEXITSTATUS(status) == 0) {
 				cout << "[Worker " << worker_id << "] Descarga completada: " << url << endl;
 			} else {
 				cerr << "[Worker " << worker_id << "] Error en descarga: " << url << endl;
 			}
-		} else {
+		} 
+		else {
 			cerr << "[Worker " << worker_id << "] Error en fork" << endl;
 		}
 
