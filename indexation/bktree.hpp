@@ -1,21 +1,41 @@
 #pragma once
 
-struct BKNode {
+#include <string>
+#include <algorithm>
+#include <unordered_set>
+#include <vector>
+
+using namespace std;
+
+struct BKNode;
+
+struct BKChild{
+    int distance;
+    BKNode* node;
+};
+
+struct BKNode{
     char word[64];
     int* songIds;
-    int songIdsCount;
-    int songIdsCapacity;
-    BKNode** children;
-    int* childDistances;
-    int childCount;
-    int childCapacity;
+    int songIdCount;
+    int songIdCapacity;
+
+    BKChild* children;
+    int childrenCount;
+    int childrenCapacity;
 };
+
+void insertWordBKTree(BKNode*& root, string word, int songId);
+
 
 // ===== FUNCIONES =====
 
-BKNode* createBKNode(const char* word);
+BKNode* createBKNode(string word, int songId);
+
 void freeBKNode(BKNode* node);
 
-void insertIntoBKTree(BKNode** root, const char* word, int songId);
+void recursiveBKInsert(BKNode* node, string word, int songId);
 
-int levenshteinDistance(const char* s1, const char* s2);
+int levenshteinDistance(string word1, string word2);
+
+void recursiveBKSearch(BKNode* node, string word, int tolerance, unordered_set<int>& idsFound);

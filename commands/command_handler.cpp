@@ -139,7 +139,7 @@ void handleSearchCommand(int clientFd, const string &args) {
 	cout << "[SEARCH] Cliente " << clientFd << " busca: \"" << query << "\"" << endl;
 
 	// Siempre buscar en AMBOS índices
-	SearchResult result = searchSongs(globalDB, query.c_str(), true, true);
+	SearchResult result = searchSongs(globalDB, query.c_str());
 
 	if (result.count == 0) {
 		string response = "SEARCH_RESULTS 0\n";

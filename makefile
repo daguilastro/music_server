@@ -12,7 +12,8 @@ SRCS = main.cpp \
        worker/worker.cpp \
        worker/worker_manager.cpp \
        indexation/database.cpp \
-       indexation/inverted_index.cpp
+       indexation/inverted_index.cpp \
+       indexation/bktree.cpp
 
 $(TARGET): $(SRCS)
 	$(CXX) $(CXXFLAGS) -o $(TARGET) $(SRCS)

@@ -1,6 +1,8 @@
 #pragma once
 
 #include <cstdint>
+#include "bktree.hpp"
+#include <vector>
 #include "inverted_index.hpp"
 
 
@@ -24,18 +26,8 @@ struct DatabaseHeader {
     char magic[4];
     uint32_t version;
     uint32_t numSongs;
-    uint32_t numTitleWords;
-    uint32_t numArtistWords;
-    
     uint64_t offsetSongs;
-    uint64_t offsetTitleIndex;
-    uint64_t offsetArtistIndex;
-    uint64_t offsetTitleTrie;
-    uint64_t offsetArtistTrie;
-    uint64_t offsetTitleBKTree;
-    uint64_t offsetArtistBKTree;
-    
-    char reserved[32];
+    char reserved[64];
 };
 #pragma pack()
 
@@ -51,6 +43,9 @@ struct SongDatabase {
     
     // Índices de artistas
     InvertedIndex* artistIndex;
+
+    // Árbol BK
+    BKNode* bkTree;
 };
 
 // ===== RESULTADO DE BÚSQUEDA =====
@@ -82,7 +77,7 @@ long getSongOffsetInFile(SongDatabase* db, uint32_t id);
 int getSongCount(SongDatabase* db);
 
 // ===== BÚSQUEDA =====
-SearchResult searchSongs(SongDatabase* db, const char* query, bool searchInTitle, bool searchInArtist);
+SearchResult searchSongs(SongDatabase* db, const char* query);
 void freeSearchResult(SearchResult* result);
 
 // ===== PERSISTENCIA =====

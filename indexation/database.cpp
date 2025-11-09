@@ -1,4 +1,7 @@
 #include "database.hpp"
+#include "bktree.hpp"
+#include "inverted_index.hpp"
+#include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -38,6 +41,9 @@ SongDatabase *createDatabase() {
 // ===== LIBERAR MEMORIA =====
 void freeDatabase(SongDatabase *db) {
 	if (!db) return;
+	freeBKNode(db->bkTree);
+	freeInvertedIndex(db->titleIndex);
+	freeInvertedIndex(db->artistIndex);
 	delete[] db->songs;
 	delete db;
 }
@@ -99,6 +105,7 @@ int addSong(SongDatabase *db, Song songSent) {
 
 	for (int i = 0; i < titleWordCount; i++) {
 		cout << "[INDEX]   - \"" << titleWords[i] << "\"" << endl;
+		insertWordBKTree(db->bkTree, titleWords[i], songSave->id);
 		addToIndex(db->titleIndex, titleWords[i], songSave->id);
 	}
 
@@ -114,6 +121,7 @@ int addSong(SongDatabase *db, Song songSent) {
 
 		for (int i = 0; i < artistWordCount; i++) {
 			cout << "[INDEX]   - \"" << artistWords[i] << "\"" << endl;
+			insertWordBKTree(db->bkTree, artistWords[i], songSave->id);
 			addToIndex(db->artistIndex, artistWords[i], songSave->id);
 		}
 	}
@@ -146,145 +154,27 @@ int getSongCount(SongDatabase *db) {
 // ============================================
 
 bool saveDatabase(SongDatabase *db, const char *filepath) {
-	cout << "[DEBUG] ===== INICIO saveDatabase() =====" << endl;
-
-	if (!db) {
-		cerr << "[ERROR] Base de datos es NULL" << endl;
-		return false;
-	}
-
-	cout << "[DEBUG] db->songCount = " << db->songCount << endl;
-	cout << "[DEBUG] db->titleIndex = " << (void *)db->titleIndex << endl;
-	cout << "[DEBUG] db->artistIndex = " << (void *)db->artistIndex << endl;
-
-	if (!db->titleIndex || !db->artistIndex) {
-		cerr << "[ERROR] Los índices no están inicializados" << endl;
-		return false;
-	}
-
-	cout << "[DEBUG] db->titleIndex->count = " << db->titleIndex->count << endl;
-	cout << "[DEBUG] db->artistIndex->count = " << db->artistIndex->count << endl;
-
-	int fd = open(filepath, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-	if (fd < 0) {
-		cerr << "[ERROR] No se pudo abrir archivo para escritura: " << filepath << endl;
-		return false;
-	}
-
-	cout << "[INFO] Guardando base de datos en: " << filepath << endl;
-
-	// ===== CREAR HEADER =====
+	// Crear header
 	DatabaseHeader header;
 	memset(&header, 0, sizeof(DatabaseHeader));
 
 	memcpy(header.magic, "MUSI", 4);
 	header.version = 1;
 	header.numSongs = db->songCount;
-	header.numTitleWords = db->titleIndex->count;
-	header.numArtistWords = db->artistIndex->count;
-
-	cout << "[DEBUG] Header preparado:" << endl;
-	cout << "        - magic: " << header.magic[0] << header.magic[1]
-		 << header.magic[2] << header.magic[3] << endl;
-	cout << "        - version: " << header.version << endl;
-	cout << "        - numSongs: " << header.numSongs << endl;
-	cout << "        - numTitleWords: " << header.numTitleWords << endl;
-	cout << "        - numArtistWords: " << header.numArtistWords << endl;
-
-	// Calcular offsets
 	header.offsetSongs = sizeof(DatabaseHeader);
-	header.offsetTitleIndex = header.offsetSongs + (db->songCount * sizeof(Song));
 
-	cout << "[DEBUG] Offset canciones: " << header.offsetSongs << endl;
-	cout << "[DEBUG] Offset índice títulos: " << header.offsetTitleIndex << endl;
+	// Abrir archivo
+	int fd = open(filepath, O_WRONLY | O_CREAT | O_TRUNC, 0644);
 
-	// Calcular tamaño del índice de títulos
-	size_t titleIndexSize = 0;
-	for (int i = 0; i < db->titleIndex->count; i++) {
-		titleIndexSize += 64 + 4 + (4 * db->titleIndex->entries[i].count);
-	}
+	// Escribir header
+	write(fd, &header, sizeof(DatabaseHeader));
 
-	header.offsetArtistIndex = header.offsetTitleIndex + titleIndexSize;
-
-	cout << "[DEBUG] Tamaño índice títulos: " << titleIndexSize << " bytes" << endl;
-	cout << "[DEBUG] Offset índice artistas: " << header.offsetArtistIndex << endl;
-
-	header.offsetTitleTrie = 0;
-	header.offsetArtistTrie = 0;
-	header.offsetTitleBKTree = 0;
-	header.offsetArtistBKTree = 0;
-
-	memset(header.reserved, 0, sizeof(header.reserved));
-
-	// ===== ESCRIBIR HEADER =====
-	cout << "[DEBUG] Escribiendo header..." << endl;
-	ssize_t written = write(fd, &header, sizeof(DatabaseHeader));
-	if (written != sizeof(DatabaseHeader)) {
-		cerr << "[ERROR] No se pudo escribir el header" << endl;
-		cerr << "[DEBUG] Bytes escritos: " << written << " de " << sizeof(DatabaseHeader) << endl;
-		close(fd);
-		return false;
-	}
-
-	cout << "[INFO] Header escrito (" << sizeof(DatabaseHeader) << " bytes)" << endl;
-
-	// ===== ESCRIBIR CANCIONES =====
-	if (db->songCount > 0) {
-		cout << "[DEBUG] Escribiendo " << db->songCount << " canciones..." << endl;
-		size_t totalBytes = sizeof(Song) * db->songCount;
-		written = write(fd, db->songs, totalBytes);
-		if (written != (ssize_t)totalBytes) {
-			cerr << "[ERROR] No se pudieron escribir todas las canciones" << endl;
-			cerr << "[DEBUG] Bytes escritos: " << written << " de " << totalBytes << endl;
-			close(fd);
-			return false;
-		}
-
-		cout << "[INFO] " << db->songCount << " canciones escritas (" << totalBytes << " bytes)" << endl;
-	} else {
-		cout << "[INFO] No hay canciones para guardar" << endl;
-	}
-
-	// ===== ESCRIBIR ÍNDICE DE TÍTULOS =====
-	if (db->titleIndex->count > 0) {
-		cout << "[DEBUG] Escribiendo índice de títulos (" << db->titleIndex->count << " palabras)..." << endl;
-		for (int i = 0; i < db->titleIndex->count; i++) {
-			WordEntry *entry = &db->titleIndex->entries[i];
-
-			cout << "[DEBUG]   - Palabra " << i << ": \"" << entry->word
-				 << "\" (" << entry->count << " IDs)" << endl;
-
-			write(fd, entry->word, 64);
-			write(fd, &entry->count, sizeof(int));
-			write(fd, entry->songIds, sizeof(int) * entry->count);
-		}
-		cout << "[INFO] Índice de títulos guardado" << endl;
-	} else {
-		cout << "[INFO] No hay palabras en índice de títulos" << endl;
-	}
-
-	// ===== ESCRIBIR ÍNDICE DE ARTISTAS =====
-	if (db->artistIndex->count > 0) {
-		cout << "[DEBUG] Escribiendo índice de artistas (" << db->artistIndex->count << " palabras)..." << endl;
-		for (int i = 0; i < db->artistIndex->count; i++) {
-			WordEntry *entry = &db->artistIndex->entries[i];
-
-			cout << "[DEBUG]   - Palabra " << i << ": \"" << entry->word
-				 << "\" (" << entry->count << " IDs)" << endl;
-
-			write(fd, entry->word, 64);
-			write(fd, &entry->count, sizeof(int));
-			write(fd, entry->songIds, sizeof(int) * entry->count);
-		}
-		cout << "[INFO] Índice de artistas guardado" << endl;
-	} else {
-		cout << "[INFO] No hay palabras en índice de artistas" << endl;
-	}
+	// Escribir SOLO canciones
+	write(fd, db->songs, sizeof(Song) * db->songCount);
 
 	close(fd);
 
-	cout << "[INFO] Base de datos guardada exitosamente" << endl;
-	cout << "[DEBUG] ===== FIN saveDatabase() =====" << endl;
+	// NO guardamos índices ✅
 
 	return true;
 }
@@ -361,8 +251,6 @@ SongDatabase *loadDatabase(const char *filepath) {
 
 	cout << "[INFO] Versión: " << header.version << endl;
 	cout << "[INFO] Canciones: " << header.numSongs << endl;
-	cout << "[INFO] Palabras en títulos: " << header.numTitleWords << endl;
-	cout << "[INFO] Palabras en artistas: " << header.numArtistWords << endl;
 
 	// ===== CREAR BASE DE DATOS =====
 	SongDatabase *db = new SongDatabase();
@@ -407,10 +295,13 @@ SongDatabase *loadDatabase(const char *filepath) {
 		db->nextSongId = 1;
 	}
 
+	close(fd);
+
 	// ===== CREAR ÍNDICES =====
 	cout << "[DEBUG] Creando índices..." << endl;
 	db->titleIndex = createInvertedIndex();
 	db->artistIndex = createInvertedIndex();
+	db->bkTree = nullptr;
 
 	if (!db->titleIndex || !db->artistIndex) {
 		cerr << "[ERROR] No se pudieron crear los índices" << endl;
@@ -421,66 +312,32 @@ SongDatabase *loadDatabase(const char *filepath) {
 
 	cout << "[DEBUG] Índices creados (vacíos)" << endl;
 
-	// ===== CARGAR ÍNDICE DE TÍTULOS =====
-	if (header.numTitleWords > 0 && header.offsetTitleIndex > 0) {
-		cout << "[DEBUG] Cargando índice de títulos..." << endl;
-		lseek(fd, header.offsetTitleIndex, SEEK_SET);
+	for (int i = 0; i < db->songCount; i++) {
+		Song *song = &db->songs[i];
+		char titleWords[50][64];
+		int titleWordCount = 0;
 
-		for (uint32_t i = 0; i < header.numTitleWords; i++) {
-			char word[64];
-			int count;
+		extractWords(song->title, titleWords, &titleWordCount, 50);
 
-			read(fd, word, 64);
-			read(fd, &count, sizeof(int));
-
-			cout << "[DEBUG]   - Palabra " << i << ": \"" << word << "\" (" << count << " IDs)" << endl;
-
-			if (count > 0 && count < 10000) {
-				int *songIds = new int[count];
-				read(fd, songIds, sizeof(int) * count);
-
-				for (int j = 0; j < count; j++) {
-					addToIndex(db->titleIndex, word, songIds[j]);
-				}
-
-				delete[] songIds;
-			}
+		for (int j = 0; j < titleWordCount; j++) {
+			addToIndex(db->titleIndex, titleWords[j], song->id);
+			insertWordBKTree(db->bkTree, titleWords[j], song->id);
 		}
-		cout << "[INFO] Índice de títulos cargado (" << db->titleIndex->count << " palabras)" << endl;
+
+		char artistWords[50][64];
+		int artistWordCount = 0;
+
+		extractWords(song->artist, artistWords, &artistWordCount, 50);
+
+		for (int j = 0; j < artistWordCount; j++) {
+			addToIndex(db->artistIndex, artistWords[j], song->id);
+			insertWordBKTree(db->bkTree, artistWords[j], song->id);
+		}
 	}
 
-	// ===== CARGAR ÍNDICE DE ARTISTAS =====
-	if (header.numArtistWords > 0 && header.offsetArtistIndex > 0) {
-		cout << "[DEBUG] Cargando índice de artistas..." << endl;
-		lseek(fd, header.offsetArtistIndex, SEEK_SET);
-
-		for (uint32_t i = 0; i < header.numArtistWords; i++) {
-			char word[64];
-			int count;
-
-			read(fd, word, 64);
-			read(fd, &count, sizeof(int));
-
-			cout << "[DEBUG]   - Palabra " << i << ": \"" << word << "\" (" << count << " IDs)" << endl;
-
-			if (count > 0 && count < 10000) {
-				int *songIds = new int[count];
-				read(fd, songIds, sizeof(int) * count);
-
-				for (int j = 0; j < count; j++) {
-					addToIndex(db->artistIndex, word, songIds[j]);
-				}
-
-				delete[] songIds;
-			}
-		}
-		cout << "[INFO] Índice de artistas cargado (" << db->artistIndex->count << " palabras)" << endl;
-	}
-
-	close(fd);
-
-	cout << "[INFO] Base de datos cargada exitosamente" << endl;
-	cout << "[DEBUG] ===== FIN loadDatabase() =====" << endl;
+	cout << "[INFO] Índices reconstruidos:" << endl;
+	cout << "  - Palabras en títulos: " << db->titleIndex->count << endl;
+	cout << "  - Palabras en artistas: " << db->artistIndex->count << endl;
 
 	return db;
 }
@@ -489,7 +346,7 @@ SongDatabase *loadDatabase(const char *filepath) {
 // ===== BÚSQUEDA DE CANCIONES =====
 // ============================================
 
-SearchResult searchSongs(SongDatabase *db, const char *query, bool searchInTitle, bool searchInArtist) {
+SearchResult searchSongs(SongDatabase *db, const char *query) {
 	SearchResult result;
 	result.capacity = 100;
 	result.songIds = new int[result.capacity];
@@ -512,9 +369,6 @@ SearchResult searchSongs(SongDatabase *db, const char *query, bool searchInTitle
 	}
 
 	cout << "[SEARCH] Buscando: \"" << query << "\"" << endl;
-	cout << "         - En títulos: " << (searchInTitle ? "SÍ" : "NO") << endl;
-	cout << "         - En artistas: " << (searchInArtist ? "SÍ" : "NO") << endl;
-
 	// ===== DEBUG: ESTADO DE LOS ÍNDICES =====
 	cout << "[DEBUG] titleIndex->count = " << db->titleIndex->count << endl;
 	cout << "[DEBUG] artistIndex->count = " << db->artistIndex->count << endl;
@@ -532,44 +386,54 @@ SearchResult searchSongs(SongDatabase *db, const char *query, bool searchInTitle
 	// Set para evitar duplicados
 	unordered_set<int> foundIds;
 
+	unordered_set<int> bkTreeIds;
+
 	// ===== BUSCAR EN TÍTULOS =====
-	if (searchInTitle) {
-		for (int i = 0; i < queryWordCount; i++) {
-			cout << "[DEBUG] Buscando \"" << queryWords[i] << "\" en titleIndex..." << endl;
 
-			WordEntry *entry = findWord(db->titleIndex, queryWords[i]);
+	for (int i = 0; i < queryWordCount; i++) {
+		cout << "[DEBUG] Buscando \"" << queryWords[i] << "\" en titleIndex..." << endl;
 
-			if (entry) {
-				cout << "[SEARCH] \"" << queryWords[i] << "\" encontrada en títulos: "
-					 << entry->count << " canciones" << endl;
+		WordEntry *entry = findWord(db->titleIndex, queryWords[i]);
+		if (entry) {
+			cout << "[SEARCH] \"" << queryWords[i] << "\" encontrada en títulos: "
+				 << entry->count << " canciones" << endl;
 
-				for (int j = 0; j < entry->count; j++) {
-					foundIds.insert(entry->songIds[j]);
-				}
-			} else {
-				cout << "[DEBUG] \"" << queryWords[i] << "\" NO encontrada en titleIndex" << endl;
+			for (int j = 0; j < entry->count; j++) {
+				foundIds.insert(entry->songIds[j]);
 			}
+		} else {
+			cout << "[DEBUG] \"" << queryWords[i] << "\" NO encontrada en titleIndex" << endl;
 		}
 	}
 
-	// ===== BUSCAR EN ARTISTAS =====
-	if (searchInArtist) {
-		for (int i = 0; i < queryWordCount; i++) {
-			cout << "[DEBUG] Buscando \"" << queryWords[i] << "\" en artistIndex..." << endl;
+	// ===== BUSCAR EN ARTISTAS Y BK TREE LUEGO TOCA ARREGLAR TODA ESTA PARTE=====
 
-			WordEntry *entry = findWord(db->artistIndex, queryWords[i]);
+	for (int i = 0; i < queryWordCount; i++) {
+		cout << "[DEBUG] Buscando \"" << queryWords[i] << "\" en artistIndex..." << endl;
 
-			if (entry) {
-				cout << "[SEARCH] \"" << queryWords[i] << "\" encontrada en artistas: "
-					 << entry->count << " canciones" << endl;
+		WordEntry *entry = findWord(db->artistIndex, queryWords[i]);
+		recursiveBKSearch(db->bkTree, queryWords[i], 2, bkTreeIds);
+		if (entry) {
+			cout << "[SEARCH] \"" << queryWords[i] << "\" encontrada en artistas: "
+				 << entry->count << " canciones" << endl;
 
-				for (int j = 0; j < entry->count; j++) {
-					foundIds.insert(entry->songIds[j]);
-				}
-			} else {
-				cout << "[DEBUG] \"" << queryWords[i] << "\" NO encontrada en artistIndex" << endl;
+			for (int j = 0; j < entry->count; j++) {
+				foundIds.insert(entry->songIds[j]);
 			}
+		} else {
+			cout << "[DEBUG] \"" << queryWords[i] << "\" NO encontrada en artistIndex" << endl;
 		}
+	}
+
+	if (!bkTreeIds.empty()) {
+		cout << "  ✅ Fuzzy encontró " << bkTreeIds.size() << " canciones" << endl;
+
+		// Añadir todos los IDs del BK-Tree a foundIds
+		for (int id : bkTreeIds) {
+			foundIds.insert(id);
+		}
+	} else {
+		cout << "  ❌ Fuzzy no encontró resultados" << endl;
 	}
 
 	// ===== CONVERTIR SET A ARRAY =====
