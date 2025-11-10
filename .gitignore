@@ -108,3 +108,5 @@ upnp_mappings.txt
 # Archivos de debug
 *.dSYM/main
 music_database.bin
+
+main
