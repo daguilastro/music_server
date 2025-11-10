@@ -79,7 +79,7 @@ void workerProcess(int read_fd, int write_fd, int worker_id) {
 				"--quiet",
 				"--no-warnings",
 				"--extractor-args", "youtube:player_client=android",
-				"-o", "~/songs/%(title)s.%(ext)s",
+				"-o", "songs/%(title)s.%(ext)s",
 				url.c_str(),
 				(char *)NULL);
 

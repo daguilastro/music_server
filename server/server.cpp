@@ -22,7 +22,7 @@ void runServer(int &serverSocket) {
 
 int mainloop(int &serverSocket) {
 	cout << "[SERVER] Cargando base de datos..." << endl;
-	globalDB = loadDatabase("music_database.bin");
+	globalDB = loadDatabase("db");
 	if (!globalDB) {
 		cerr << "[ERROR] No se pudo cargar la base de datos" << endl;
 		return -1;
@@ -57,7 +57,7 @@ int mainloop(int &serverSocket) {
 	}
 	// Cleanup
 	
-	saveDatabase(globalDB, "music_database.bin");
+	saveDatabase(globalDB, "db");
 	freeDatabase(globalDB);
 	shutdownWorkers();
 	closeAllClients();
