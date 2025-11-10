@@ -1,6 +1,7 @@
 #include "database.hpp"
 #include "bktree.hpp"
 #include "inverted_index.hpp"
+#include "trie.hpp"
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -25,6 +26,7 @@ SongDatabase *createDatabase() {
 	// ===== INICIALIZAR ÍNDICES =====
 	db->titleIndex = createInvertedIndex();
 	db->artistIndex = createInvertedIndex();
+	db->trie = createTrie();
 
 	if (!db->titleIndex || !db->artistIndex) {
 		cerr << "[ERROR] No se pudieron crear los índices" << endl;
@@ -44,6 +46,7 @@ void freeDatabase(SongDatabase *db) {
 	freeBKNode(db->bkTree);
 	freeInvertedIndex(db->titleIndex);
 	freeInvertedIndex(db->artistIndex);
+	freeTrie(db->trie);
 	delete[] db->songs;
 	delete db;
 }
@@ -106,6 +109,7 @@ int addSong(SongDatabase *db, Song songSent) {
 	for (int i = 0; i < titleWordCount; i++) {
 		cout << "[INDEX]   - \"" << titleWords[i] << "\"" << endl;
 		insertWordBKTree(db->bkTree, titleWords[i], songSave->id);
+		insertWord(db->trie, titleWords[i], songSave->id);
 		addToIndex(db->titleIndex, titleWords[i], songSave->id);
 	}
 
@@ -122,6 +126,7 @@ int addSong(SongDatabase *db, Song songSent) {
 		for (int i = 0; i < artistWordCount; i++) {
 			cout << "[INDEX]   - \"" << artistWords[i] << "\"" << endl;
 			insertWordBKTree(db->bkTree, artistWords[i], songSave->id);
+			insertWord(db->trie, artistWords[i], songSave->id);
 			addToIndex(db->artistIndex, artistWords[i], songSave->id);
 		}
 	}
@@ -302,6 +307,7 @@ SongDatabase *loadDatabase(const char *filepath) {
 	db->titleIndex = createInvertedIndex();
 	db->artistIndex = createInvertedIndex();
 	db->bkTree = nullptr;
+	db->trie = createTrie();
 
 	if (!db->titleIndex || !db->artistIndex) {
 		cerr << "[ERROR] No se pudieron crear los índices" << endl;
@@ -322,6 +328,7 @@ SongDatabase *loadDatabase(const char *filepath) {
 		for (int j = 0; j < titleWordCount; j++) {
 			addToIndex(db->titleIndex, titleWords[j], song->id);
 			insertWordBKTree(db->bkTree, titleWords[j], song->id);
+			insertWord(db->trie, titleWords[j], song->id);
 		}
 
 		char artistWords[50][64];
@@ -332,6 +339,7 @@ SongDatabase *loadDatabase(const char *filepath) {
 		for (int j = 0; j < artistWordCount; j++) {
 			addToIndex(db->artistIndex, artistWords[j], song->id);
 			insertWordBKTree(db->bkTree, artistWords[j], song->id);
+			insertWord(db->trie, artistWords[j], song->id);
 		}
 	}
 
@@ -385,7 +393,7 @@ SearchResult searchSongs(SongDatabase *db, const char *query) {
 
 	// Set para evitar duplicados
 	unordered_set<int> foundIds;
-
+	unordered_set<int> trieIds;
 	unordered_set<int> bkTreeIds;
 
 	// ===== BUSCAR EN TÍTULOS =====
@@ -413,6 +421,7 @@ SearchResult searchSongs(SongDatabase *db, const char *query) {
 
 		WordEntry *entry = findWord(db->artistIndex, queryWords[i]);
 		recursiveBKSearch(db->bkTree, queryWords[i], 2, bkTreeIds);
+		searchPrefix(db->trie, queryWords[i], trieIds);
 		if (entry) {
 			cout << "[SEARCH] \"" << queryWords[i] << "\" encontrada en artistas: "
 				 << entry->count << " canciones" << endl;
@@ -435,6 +444,18 @@ SearchResult searchSongs(SongDatabase *db, const char *query) {
 	} else {
 		cout << "  ❌ Fuzzy no encontró resultados" << endl;
 	}
+
+		if (!trieIds.empty()) {
+		cout << "  ✅ prefix encontró " << trieIds.size() << " canciones" << endl;
+
+		// Añadir todos los IDs del BK-Tree a foundIds
+		for (int id : trieIds) {
+			foundIds.insert(id);
+		}
+	} else {
+		cout << "  ❌ Prefix no encontró resultados" << endl;
+	}
+
 
 	// ===== CONVERTIR SET A ARRAY =====
 	for (int id : foundIds) {

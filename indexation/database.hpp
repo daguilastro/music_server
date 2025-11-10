@@ -4,6 +4,7 @@
 #include "bktree.hpp"
 #include <vector>
 #include "inverted_index.hpp"
+#include "trie.hpp"
 
 
 using namespace std;
@@ -46,6 +47,8 @@ struct SongDatabase {
 
     // Árbol BK
     BKNode* bkTree;
+
+    Trie* trie;
 };
 
 // ===== RESULTADO DE BÚSQUEDA =====
