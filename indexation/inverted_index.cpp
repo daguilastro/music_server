@@ -123,9 +123,7 @@ static bool isValidWordChar(const unsigned char* ptr, int* charLen) {
 }
 
 // ===== EXTRAER PALABRAS DE UN TEXTO (CON SOPORTE UTF-8) =====
-void extractWords(const char* text, char words[][64], int* wordCount, int maxWords) {
-    *wordCount = 0;
-    
+void extractWords(const char* text, char words[][64], int* wordCount, int maxWords) {    
     if (!text || text[0] == '\0') {
         return;
     }
@@ -252,7 +250,8 @@ WordEntry* findWord(InvertedIndex* index, const char* word) {
 }
 
 // ===== AÑADIR PALABRA + SONG ID AL ÍNDICE =====
-void addToIndex(InvertedIndex* index, const char* word, int songId) {
+void insertWordIndex(InvertedIndex* index, string wordString, int songId) {
+    const char* word = wordString.c_str();
     if (!index || !word || word[0] == '\0') return;
     
     // Buscar si la palabra ya existe

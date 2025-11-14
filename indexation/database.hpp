@@ -40,10 +40,7 @@ struct SongDatabase {
     int nextSongId;
     
     // Índices de títulos
-    InvertedIndex* titleIndex;
-    
-    // Índices de artistas
-    InvertedIndex* artistIndex;
+    InvertedIndex* invertedIndex;
 
     // Árbol BK
     BKNode* bkTree;
@@ -76,9 +73,6 @@ bool isDuplicateURL(SongDatabase* db, const char* url);
 Song* getSongById(SongDatabase* db, uint32_t id);
 long getSongOffsetInFile(SongDatabase* db, uint32_t id);
 
-// Información
-int getSongCount(SongDatabase* db);
-
 // ===== BÚSQUEDA =====
 SearchResult searchSongs(SongDatabase* db, const char* query);
 void freeSearchResult(SearchResult* result);
@@ -87,3 +81,5 @@ void freeSearchResult(SearchResult* result);
 bool saveDatabase(SongDatabase* db, const char* filepath);
 SongDatabase* loadDatabase(const char* filepath);
 void indexSong(Song song);
+
+void insertWordDatabase(SongDatabase* db, string word, uint32_t id);

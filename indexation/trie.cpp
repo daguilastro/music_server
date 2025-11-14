@@ -22,7 +22,7 @@ Trie* createTrie() {
 }
 
 // ===== INSERTAR PALABRA =====
-void insertWord(Trie* trie, string word, int songId) {
+void insertWordTrie(Trie* trie, string word, int songId) {
     if (!trie || word.empty()) return;
     
     TrieNode* node = trie->root;

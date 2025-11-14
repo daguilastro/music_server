@@ -12,10 +12,10 @@ using namespace std;
 map<string, void (*)(int, const string &)> commandHandlers;
 
 void initializeCommandHandlers() {
-	commandHandlers["ADD"] = handleAddCommand;
+	commandHandlers["ADD"] = handleAddCommand;	//	no está verificando que la url ya esté
 	commandHandlers["EXIT"] = handleExitCommand;
-	commandHandlers["GET"] = handleGetCommand;
-	commandHandlers["SEARCH"] = handleSearchCommand;
+	commandHandlers["GET"] = handleGetCommand;	//
+	commandHandlers["SEARCH"] = handleSearchCommand;	// hay que implementar un search bueno.
 	cout << "[Server] Command handlers initialized" << endl;
 }
 

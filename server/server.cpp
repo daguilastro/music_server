@@ -27,7 +27,7 @@ int mainloop(int &serverSocket) {
 		cerr << "[ERROR] No se pudo cargar la base de datos" << endl;
 		return -1;
 	}
-	cout << "[SERVER] Base de datos lista (" << getSongCount(globalDB) << " canciones)" << endl;
+	cout << "[SERVER] Base de datos lista " << endl;
 
 	int epollFd = createEpoll();
 	if (epollFd < 0) {

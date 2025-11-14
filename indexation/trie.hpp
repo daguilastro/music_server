@@ -21,6 +21,6 @@ struct Trie {
 
 
 Trie* createTrie();
-void insertWord(Trie* trie, string word, int songId);
+void insertWordTrie(Trie* trie, string word, int songId);
 void searchPrefix(Trie* trie, string prefix, unordered_set<int>& results);
 void freeTrie(Trie* trie);

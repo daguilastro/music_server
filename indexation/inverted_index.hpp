@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <string>
 
 using namespace std;
 
@@ -25,7 +26,7 @@ struct InvertedIndex {
 InvertedIndex* createInvertedIndex();
 void freeInvertedIndex(InvertedIndex* index);
 
-void addToIndex(InvertedIndex* index, const char* word, int songId);
+void insertWordIndex(InvertedIndex* index, string word, int songId);
 WordEntry* findWord(InvertedIndex* index, const char* word);
 
 // Helper para palabras
