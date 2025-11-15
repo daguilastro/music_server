@@ -1,8 +1,9 @@
 #include "trie.hpp"
-#include <algorithm>
 #include <cctype>
 #include <cstring>
 #include <unordered_set>
+
+using namespace std;
 
 // ===== CREAR NODO =====
 TrieNode* createTrieNode() {

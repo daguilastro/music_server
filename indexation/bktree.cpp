@@ -1,7 +1,7 @@
 #include "bktree.hpp"
 #include <cstddef>
 #include <cstring>
-#include <string>
+#include <algorithm>
 
 void insertWordBKTree(BKNode *&root, string word, int songId) {
 	if (root == nullptr) {
@@ -80,7 +80,7 @@ int levenshteinDistance(string word, string target) {
 			if (word[i - 1] == target[j - 1]) {
 				dp[i][j] = dp[i - 1][j - 1];
 			} else {
-				dp[i][j] = 1 + min({ dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1] });
+				dp[i][j] = 1 + std::min({ dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1] });
 			}
 		}
 	}
@@ -107,7 +107,7 @@ BKNode *createBKNode(string word, int songId) {
 	return root;
 }
 
-void recursiveBKSearch(BKNode* node, string word, int tolerance, unordered_set<int>& idsFound){
+void recursiveBKSearch(BKNode* node, string word, int tolerance, std::unordered_set<int>& idsFound){
 	int distance = levenshteinDistance(node->word, word);
 
 	if (distance <= tolerance){

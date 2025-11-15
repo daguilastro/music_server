@@ -75,11 +75,8 @@ long getSongOffsetInFile(SongDatabase *db, uint32_t id) {
 }
 
 void insertWordDatabase(SongDatabase *db, string word, uint32_t id) {
-	cout << "insertando a BK tree..." << endl;
 	insertWordBKTree(db->bkTree, word, id);
-	cout << "insertando a trie..." << endl;
 	insertWordTrie(db->trie, word, id);
-	cout << "insertando a index..." << endl;
 	insertWordIndex(db->invertedIndex, word, id);
 }
 
@@ -116,11 +113,7 @@ int addSong(SongDatabase *db, Song songSent) {
 		cout << "[INDEX]   - \"" << words[i] << "\"" << endl;
 		insertWordDatabase(db, words[i], songSave->id);
 	}
-
 	cout << "[INFO] Canción añadida e indexada: [" << songSave->id << "] " << songSave->title << " - " << songSave->artist << endl;
-	cout << "[DEBUG] Estado de índices:" << endl;
-	cout << "[DEBUG]   invertedIndex->count = " << db->invertedIndex->count << endl;
-	cout << "palabras en tree: " << db->bkTree->songIdCount << endl;
 
 	return songSave->id;
 }

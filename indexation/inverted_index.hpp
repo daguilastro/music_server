@@ -1,9 +1,8 @@
 #pragma once
 
-#include <cstdint>
 #include <string>
 
-using namespace std;
+using std::string;
 
 // ===== ENTRADA DEL ÍNDICE INVERTIDO =====
 #pragma pack(1)
@@ -12,6 +11,8 @@ struct WordEntry {
     int* songIds;       // Array dinámico de IDs de canciones
     int count;          // Cantidad ACTUAL de IDs en el array
     int capacity;       // Capacidad MÁXIMA del array (memoria alocada)
+    int documentFrequency = 0;  // Frecuencia con la que aparece
+    double inverseDocumentFrequency = 0.0;    // lo que dice su nombre
 };
 #pragma pack()
 

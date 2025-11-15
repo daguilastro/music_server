@@ -1,11 +1,10 @@
 #pragma once
 
 #include <string>
-#include <algorithm>
 #include <unordered_set>
-#include <vector>
 
-using namespace std;
+using std::string;
+
 
 struct BKNode;
 
@@ -38,4 +37,4 @@ void recursiveBKInsert(BKNode* node, string word, int songId);
 
 int levenshteinDistance(string word1, string word2);
 
-void recursiveBKSearch(BKNode* node, string word, int tolerance, unordered_set<int>& idsFound);
+void recursiveBKSearch(BKNode* node, string word, int tolerance, std::unordered_set<int>& idsFound);

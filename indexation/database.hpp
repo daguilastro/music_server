@@ -1,13 +1,13 @@
 #pragma once
 
 #include <cstdint>
-#include "bktree.hpp"
-#include <vector>
-#include "inverted_index.hpp"
-#include "trie.hpp"
+#include <string>
 
+struct BKNode;
+struct InvertedIndex;
+struct Trie;
 
-using namespace std;
+using std::string;
 
 // ===== ESTRUCTURA DE CANCIÓN =====
 #pragma pack(1)
