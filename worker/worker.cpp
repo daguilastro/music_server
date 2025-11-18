@@ -74,7 +74,7 @@ void workerProcess(int read_fd, int write_fd, int worker_id) {
 
 			execl("/usr/bin/yt-dlp",
 				"yt-dlp",
-				"--print", "before_dl:%(title)s\n%(artist,uploader)s\n%(duration)s\n",
+				"--print", "before_dl:%(title)s\n%(artist,uploader)s\n%(duration)s",
 				"-x", "--audio-format", "mp3",
 				"--quiet",
 				"--no-warnings",
@@ -109,10 +109,14 @@ void workerProcess(int read_fd, int write_fd, int worker_id) {
 
 			WorkerMessage messageMetadata;
 			
+			cout << "[DEBUG WORKER] url en url.c_str() " << url.c_str() << endl;
 			memcpy(metadata + bytesMetadata, url.c_str(), url.size());
 			bytesMetadata += url.length();
+			metadata[bytesMetadata] = '\0';
+			cout << "[DEBUG WORKER] url copiada en metadata[2048]" << metadata << endl;
 			messageMetadata.type = MSG_METADATA;
 			memcpy(messageMetadata.data, metadata, bytesMetadata);
+			messageMetadata.data[bytesMetadata] = '\0';
 			messageMetadata.data_length = bytesMetadata;
 
 			if (!writeWorkerMessage(write_fd, messageMetadata)) {

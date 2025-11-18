@@ -1,6 +1,4 @@
-#include "client_state.hpp"
-#include "client_handlers.hpp"
-#include "client_display.hpp"
+#include <cstdint>
 #include <iostream>
 #include <cstring>
 #include <unistd.h>
@@ -9,24 +7,18 @@
 #include <arpa/inet.h>
 #include <fcntl.h>
 #include <sys/epoll.h>
+#include "client_command_handler.hpp"
 
 using namespace std;
+
+map<uint8_t, void (*)(int, int)> serverMessages;
+
+
 
 // ===== DEFINICIÓN DE VARIABLES GLOBALES =====
 int clientSocket = -1;
 bool clientRunning = true;
-string receivedResponse = "";
-ClientState clientState = STATE_IDLE;
 
-string tempUrl = "";
-string tempQuery = "";
-
-// ===== ESTRUCTURA DE CALLBACK =====
-struct EpollCallbackData {
-    int fd;
-    void (*handler)(int fd, void* data);
-    void* data;
-};
 
 // ===== FUNCIONES DE EPOLL =====
 int createEpoll() {
@@ -38,15 +30,14 @@ int createEpoll() {
     return epollFd;
 }
 
-int addToEpoll(int epollFd, int fd, void (*handler)(int, void*), void* data) {
+int addToEpoll(int epollFd, int fd, void (*handler)(int)) {
     EpollCallbackData* callback = new EpollCallbackData;
-    callback->fd = fd;
     callback->handler = handler;
-    callback->data = data;
 
     struct epoll_event event;
     event.events = EPOLLIN;
     event.data.ptr = callback;
+    callback->fd = event.data.fd;
 
     if (epoll_ctl(epollFd, EPOLL_CTL_ADD, fd, &event) != 0) {
         cerr << "[ERROR] No se pudo agregar FD " << fd << " a epoll\n";
@@ -103,8 +94,7 @@ int main(int argc, char *argv[]) {
         return 1;
     }
     
-    addToEpoll(epollFd, clientSocket, handleServerEvent, nullptr);
-    addToEpoll(epollFd, STDIN_FILENO, handleStdinEvent, nullptr);
+    addToEpoll(epollFd, clientSocket, handleServerEvent);
     
     cout << "\n========================================\n";
     cout << "Comandos disponibles:\n";
@@ -114,7 +104,6 @@ int main(int argc, char *argv[]) {
     cout << "  EXIT      - Cerrar servidor\n";
     cout << "  quit      - Desconectar cliente\n";
     cout << "========================================\n\n";
-    showPrompt();
     
     struct epoll_event events[10];
     
@@ -128,7 +117,7 @@ int main(int argc, char *argv[]) {
         
         for (int i = 0; i < nfds; i++) {
             EpollCallbackData* callback = (EpollCallbackData*)events[i].data.ptr;
-            callback->handler(callback->fd, callback->data);
+            callback->handler(callback->fd);
         }
     }
     

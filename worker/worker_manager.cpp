@@ -112,11 +112,13 @@ void handleWorkerEvent(int fd, void *data) {
 	else if (response.type == MSG_METADATA) {
 		char metadata[2048];
 		memcpy(metadata, response.data, response.data_length);
+		metadata[response.data_length] = '\0';
+		cout << "[DEBUG WORKER MANAGER] los metadatos recibidos son " << response.data << endl;
 
 		char *title = strtok(metadata, "\n");
 		char *artist = strtok(nullptr, "\n");
 		char *duration = strtok(nullptr, "\n");
-		char *url = strtok(nullptr, "\n");
+		char *url = strtok(nullptr, "\0");
 		if (!title || !artist || !duration || !url) {
 			cerr << "[ERROR] Metadatos incompletos" << endl;
 			return;
@@ -125,13 +127,13 @@ void handleWorkerEvent(int fd, void *data) {
 		Song songMetadata;
 
 		strcpy(songMetadata.title, title);
-		cout << "[DEBUG] title " << title << endl;
+		cout << "[DEBUG WORKER MANAGER] title " << title << endl;
 		strcpy(songMetadata.artist, artist);
-		cout << "[DEBUG] artist " << artist << endl;
+		cout << "[DEBUG WORKER MANAGER] artist " << artist << endl;
 		strcpy(songMetadata.url, url);
-		cout << "[DEBUG] url " << url << endl;
+		cout << "[DEBUG WORKER MANAGER] url " << url << endl;
 		songMetadata.duration = atoi(duration);
-		cout << "[DEBUG] duration " << duration << endl;
+		cout << "[DEBUG WORKER MANAGER] duration " << duration << endl;
 
 		string filename = title;
 		for (char &c : filename) {

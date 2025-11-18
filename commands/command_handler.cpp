@@ -12,7 +12,7 @@ using namespace std;
 map<string, void (*)(int, const string &)> commandHandlers;
 
 void initializeCommandHandlers() {
-	commandHandlers["ADD"] = handleAddCommand;	//	no está verificando que la url ya esté
+	commandHandlers["ADD"] = handleAddCommand;	//	no está verificando que la url ya esté (faltá hacer que solo use los links globales)
 	commandHandlers["EXIT"] = handleExitCommand;
 	commandHandlers["GET"] = handleGetCommand;	//
 	commandHandlers["SEARCH"] = handleSearchCommand;	// hay que implementar un search bueno.
