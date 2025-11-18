@@ -99,7 +99,6 @@ test_output/
 # ===== Específico del proyecto =====
 # Ejecutables del proyecto
 server
-client
 test_database
 
 # Archivos generados por UPnP
@@ -110,3 +109,5 @@ upnp_mappings.txt
 db
 
 main
+
+client/client
