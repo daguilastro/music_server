@@ -1,0 +1,12 @@
+[
+    {
+        "directory": "${workspaceFolder}",
+        "command": "g++ -std=c++20 -fmodules-ts -fpreprocessed",
+        "file": "${workspaceFolder}/logging/logger.cppm"
+    },
+    {
+        "directory": "${workspaceFolder}",
+        "command": "g++ -std=c++20 -fmodules-ts -fpreprocessed",
+        "file": "${workspaceFolder}/network2/socket.cppm"
+    }
+]
